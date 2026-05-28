@@ -23,8 +23,8 @@ public class MCQServiceTest extends BaseTest {
         sme      = createSME("svc.sme", "Service SME");
         admin    = createAdmin("svc.admin");
         reviewer = createSME("svc.reviewer", "Service Reviewer");
-        stack    = createStack("Spring Boot");
-        topic    = createTopic("Spring Boot Starters", stack);
+        stack    = createStack("Test Stack Service 77");
+        topic    = createTopic("Test Topic Service 77", stack);
 
         UserStackMapping m = new UserStackMapping();
         m.setUser(reviewer);
@@ -64,8 +64,8 @@ public class MCQServiceTest extends BaseTest {
     @DisplayName("Create MCQ links correct stack and topic")
     void createMCQ_linksStackAndTopic() {
         MCQDTO.Response r = mcqService.createMCQ(sme.getEnterpriseId(), buildCreate(false));
-        assertThat(r.getStackName()).isEqualTo("Spring Boot");
-        assertThat(r.getTopicName()).isEqualTo("Spring Boot Starters");
+        assertThat(r.getStackName()).isEqualTo("Test Stack Service 77");
+        assertThat(r.getTopicName()).isEqualTo("Test Topic Service 77");
     }
 
     // ── UPDATE ──────────────────────────────────────────────
@@ -230,17 +230,213 @@ public class MCQServiceTest extends BaseTest {
                 .contains("UNIQUESEARCHTERM_XYZ");
     }
 
+    // ── DUPLICATE DETECTION ─────────────────────────────────
+
+@Test
+@DisplayName("Create MCQ fails when duplicate stem exists in same stack and topic")
+void createMCQ_duplicateStem_throwsException() {
+    // Create first question
+    mcqService.createMCQ(sme.getEnterpriseId(), buildCreate(false));
+
+    // Try creating same question again
+    assertThatThrownBy(() ->
+        mcqService.createMCQ(sme.getEnterpriseId(), buildCreate(false)))
+        .isInstanceOf(RuntimeException.class)
+        .hasMessageContaining("Duplicate question");
+}
+
+@Test
+@DisplayName("Create MCQ succeeds with same stem in different topic")
+void createMCQ_sameStemDifferentTopic_succeeds() {
+    Topic topic2 = createTopic("Spring Boot Testing", stack);
+
+    MCQDTO.CreateRequest req1 = buildCreate(false);
+    MCQDTO.CreateRequest req2 = new MCQDTO.CreateRequest(
+        "Test question?", "MCQ",
+        stack.getStackId(), topic2.getTopicId(), "Easy",
+        "Option A", "Option B", "Option C", "Option D", null, null, "B", false);
+
+    mcqService.createMCQ(sme.getEnterpriseId(), req1);
+    // Should not throw — different topic
+    MCQDTO.Response r = mcqService.createMCQ(sme.getEnterpriseId(), req2);
+    assertThat(r.getQuestionId()).isNotNull();
+}
+
+@Test
+@DisplayName("Update MCQ fails when stem matches another existing question")
+void updateMCQ_duplicateStem_throwsException() {
+    // Create two questions
+    MCQDTO.Response q1 = mcqService.createMCQ(sme.getEnterpriseId(), buildCreate(false));
+
+    MCQDTO.CreateRequest req2 = new MCQDTO.CreateRequest(
+        "Another question?", "MCQ",
+        stack.getStackId(), topic.getTopicId(), "Easy",
+        "Option A", "Option B", "Option C", "Option D", null, null, "A", false);
+    MCQ q2 = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+    q2.setQuestionStem("Another question?");
+    mcqRepository.save(q2);
+
+    // Try updating q2 to have same stem as q1
+    MCQDTO.UpdateRequest updateReq = new MCQDTO.UpdateRequest(
+        "Test question?", "MCQ",
+        stack.getStackId(), topic.getTopicId(), "Medium",
+        "Option A", "Option B", "Option C", "Option D", null, null, "A", false);
+
+    assertThatThrownBy(() ->
+        mcqService.updateMCQ(sme.getEnterpriseId(), q2.getQuestionId(), updateReq, false))
+        .isInstanceOf(RuntimeException.class)
+        .hasMessageContaining("Duplicate question");
+}
+
+@Test
+@DisplayName("Update MCQ succeeds with same stem as itself (no false duplicate)")
+void updateMCQ_sameStemAsSelf_succeeds() {
+    MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+    mcq.setQuestionStem("Self update question?");
+    mcqRepository.save(mcq);
+
+    // Update with same stem — should NOT throw
+    MCQDTO.UpdateRequest req = new MCQDTO.UpdateRequest(
+        "Self update question?", "MCQ",
+        stack.getStackId(), topic.getTopicId(), "Hard",
+        "Option A", "Option B", "Option C", "Option D", null, null, "B", false);
+
+    MCQDTO.Response r = mcqService.updateMCQ(
+            sme.getEnterpriseId(), mcq.getQuestionId(), req, false);
+    assertThat(r.getQuestionStem()).isEqualTo("Self update question?");
+}
+
+@Test
+@DisplayName("Whitespace normalization — treats extra spaces as same question")
+void createMCQ_extraWhitespaceStem_treatedAsDuplicate() {
+    mcqService.createMCQ(sme.getEnterpriseId(), buildCreate(false));
+
+    // Same question with extra internal spaces
+    MCQDTO.CreateRequest reqWithSpaces = new MCQDTO.CreateRequest(
+        "Test  question?", "MCQ",  // double space
+        stack.getStackId(), topic.getTopicId(), "Easy",
+        "Option A", "Option B", "Option C", "Option D", null, null, "B", false);
+
+    assertThatThrownBy(() ->
+        mcqService.createMCQ(sme.getEnterpriseId(), reqWithSpaces))
+        .isInstanceOf(RuntimeException.class)
+        .hasMessageContaining("Duplicate question");
+}
+
+// ── MSQ TESTS ────────────────────────────────────────────
+
+@Test
+@DisplayName("Create MSQ saves correctly with multiple correct answers")
+void createMSQ_savesCorrectly() {
+    MCQDTO.CreateRequest req = new MCQDTO.CreateRequest(
+        "Which are OOP principles?", "MSQ",
+        stack.getStackId(), topic.getTopicId(), "Medium",
+        "Inheritance", "Compilation", "Encapsulation", "Linking",
+        "Polymorphism", null, "A,C,E", false);
+
+    MCQDTO.Response r = mcqService.createMCQ(sme.getEnterpriseId(), req);
+
+    assertThat(r.getQuestionType()).isEqualTo("MSQ");
+    assertThat(r.getCorrectAnswer()).isEqualTo("A,C,E");
+    assertThat(r.getOptionE()).isEqualTo("Polymorphism");
+}
+
+@Test
+@DisplayName("Create MSQ saves as READY_FOR_REVIEW when sendForReview=true")
+void createMSQ_sendForReview() {
+    MCQDTO.CreateRequest req = new MCQDTO.CreateRequest(
+        "Which are Java collection types?", "MSQ",
+        stack.getStackId(), topic.getTopicId(), "Easy",
+        "ArrayList", "HashMap", "Compilation", "LinkedList",
+        null, null, "A,B,D", true);
+
+    MCQDTO.Response r = mcqService.createMCQ(sme.getEnterpriseId(), req);
+
+    assertThat(r.getStatus()).isEqualTo("READY_FOR_REVIEW");
+    assertThat(r.getQuestionType()).isEqualTo("MSQ");
+}
+
+@Test
+@DisplayName("Create MSQ with optionE and optionF saves both options")
+void createMSQ_withSixOptions_savesBothEAndF() {
+    MCQDTO.CreateRequest req = new MCQDTO.CreateRequest(
+        "Which are valid Java keywords?", "MSQ",
+        stack.getStackId(), topic.getTopicId(), "Hard",
+        "class", "struct", "interface", "pointer",
+        "extends", "implements", "A,C,E,F", false);
+
+    MCQDTO.Response r = mcqService.createMCQ(sme.getEnterpriseId(), req);
+
+    assertThat(r.getOptionE()).isEqualTo("extends");
+    assertThat(r.getOptionF()).isEqualTo("implements");
+    assertThat(r.getCorrectAnswer()).isEqualTo("A,C,E,F");
+}
+
+@Test
+@DisplayName("MSQ duplicate detection works same as MCQ")
+void createMSQ_duplicate_throwsException() {
+    MCQDTO.CreateRequest req = new MCQDTO.CreateRequest(
+        "Which are OOP principles?", "MSQ",
+        stack.getStackId(), topic.getTopicId(), "Medium",
+        "Inheritance", "Compilation", "Encapsulation", "Linking",
+        "Polymorphism", null, "A,C,E", false);
+
+    mcqService.createMCQ(sme.getEnterpriseId(), req);
+
+    assertThatThrownBy(() ->
+        mcqService.createMCQ(sme.getEnterpriseId(), req))
+        .isInstanceOf(RuntimeException.class)
+        .hasMessageContaining("Duplicate question");
+}
+
+@Test
+@DisplayName("MCQ and MSQ with same stem in same topic are treated as duplicates")
+void mcqAndMsq_sameStem_treatedAsDuplicate() {
+    // Create as MCQ
+    mcqService.createMCQ(sme.getEnterpriseId(), buildCreate(false));
+
+    // Try creating as MSQ with same stem
+    MCQDTO.CreateRequest msqReq = new MCQDTO.CreateRequest(
+        "Test question?", "MSQ",
+        stack.getStackId(), topic.getTopicId(), "Easy",
+        "Option A", "Option B", "Option C", "Option D",
+        "Option E", null, "A,C", false);
+
+    assertThatThrownBy(() ->
+        mcqService.createMCQ(sme.getEnterpriseId(), msqReq))
+        .isInstanceOf(RuntimeException.class)
+        .hasMessageContaining("Duplicate question");
+}
+
+@Test
+@DisplayName("Update MCQ to MSQ type succeeds")
+void updateMCQ_changeTypeToMSQ_succeeds() {
+    MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+
+    MCQDTO.UpdateRequest req = new MCQDTO.UpdateRequest(
+        "What is Spring Boot?", "MSQ",
+        stack.getStackId(), topic.getTopicId(), "Medium",
+        "A framework", "A database", "A build tool", "An ORM",
+        "A Spring module", null, "A,C,E", false);
+
+    MCQDTO.Response r = mcqService.updateMCQ(
+            sme.getEnterpriseId(), mcq.getQuestionId(), req, false);
+
+    assertThat(r.getQuestionType()).isEqualTo("MSQ");
+    assertThat(r.getCorrectAnswer()).isEqualTo("A,C,E");
+}
+
     // ── HELPERS ───────────────────────────────────────────
 
     private MCQDTO.CreateRequest buildCreate(boolean send) {
-        return new MCQDTO.CreateRequest("Test question?", stack.getStackId(),
-                topic.getTopicId(), "Easy",
-                "Option A", "Option B", "Option C", "Option D", "B", send);
-    }
+    return new MCQDTO.CreateRequest("Test question?", "MCQ", stack.getStackId(),
+            topic.getTopicId(), "Easy",
+            "Option A", "Option B", "Option C", "Option D", null, null, "B", send);
+}
 
-    private MCQDTO.UpdateRequest buildUpdate(String stem, boolean send) {
-        return new MCQDTO.UpdateRequest(stem, stack.getStackId(),
-                topic.getTopicId(), "Medium",
-                "Option A", "Option B", "Option C", "Option D", "A", send);
-    }
+private MCQDTO.UpdateRequest buildUpdate(String stem, boolean send) {
+    return new MCQDTO.UpdateRequest(stem, "MCQ", stack.getStackId(),
+            topic.getTopicId(), "Medium",
+            "Option A", "Option B", "Option C", "Option D", null, null, "A", send);
+}
 }

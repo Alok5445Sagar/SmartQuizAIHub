@@ -1,9 +1,6 @@
 -- ============================================================
--- Smart Quiz AI Hub — Full Schema + Seed Data
+-- Smart Quiz AI Hub — Full Schema + Seed Data (Updated with MSQ)
 -- MySQL 8.0+
--- Run this once before starting the application,
--- OR let Spring Boot auto-create tables (ddl-auto=update)
--- and this file will only be needed for reference/manual setup.
 -- ============================================================
 
 CREATE DATABASE IF NOT EXISTS smart_quiz_hub
@@ -47,11 +44,14 @@ CREATE TABLE IF NOT EXISTS user_stack_mapping (
 CREATE TABLE IF NOT EXISTS mcqs (
     question_id            BIGINT AUTO_INCREMENT PRIMARY KEY,
     question_stem          TEXT NOT NULL,
+    question_type          ENUM('MCQ','MSQ') NOT NULL DEFAULT 'MCQ',
     option_a               VARCHAR(500) NOT NULL,
     option_b               VARCHAR(500) NOT NULL,
     option_c               VARCHAR(500) NOT NULL,
     option_d               VARCHAR(500) NOT NULL,
-    correct_answer         CHAR(1) NOT NULL COMMENT 'A, B, C or D',
+    option_e               VARCHAR(500) NULL,
+    option_f               VARCHAR(500) NULL,
+    correct_answer         VARCHAR(20) NOT NULL COMMENT 'MCQ: single letter e.g. A | MSQ: comma-separated e.g. A,C,E',
     difficulty             ENUM('Easy','Medium','Hard') NOT NULL,
     stack_id               BIGINT NOT NULL,
     topic_id               BIGINT NOT NULL,
@@ -81,13 +81,12 @@ INSERT IGNORE INTO technology_stacks (stack_id, stack_name) VALUES
 
 -- ============================================================
 -- SEED DATA — Topics
--- (stack_id references above)
 -- ============================================================
 
 INSERT IGNORE INTO topics (topic_id, topic_name, stack_id) VALUES
 -- Spring Cloud (1001)
-(1001, 'Introduction to Spring Cloud',                                          1001),
-(1002, 'Service Discovery design pattern – Eureka Server & Discovery Client',  1001),
+(1001, 'Introduction to Spring Cloud',                                         1001),
+(1002, 'Service Discovery design pattern - Eureka Server & Discovery Client',  1001),
 (1003, 'Eureka Heartbeats & Self Preservation',                                1001),
 (1004, 'Spring Cloud Loadbalancer',                                            1001),
 (1005, 'Spring Cloud OpenFeign',                                               1001),
@@ -95,77 +94,51 @@ INSERT IGNORE INTO topics (topic_id, topic_name, stack_id) VALUES
 (1007, 'Spring Boot Actuator',                                                 1001),
 
 -- Spring Boot (1002)
-(1008, 'Spring Boot Auto-Configuration',   1002),
-(1009, 'Spring Boot Starters',             1002),
-(1010, 'Embedded Server Configuration',    1002),
-(1011, 'Application Properties & Profiles',1002),
-(1012, 'Spring Boot Testing',              1002),
+(1008, 'Spring Boot Auto-Configuration',    1002),
+(1009, 'Spring Boot Starters',              1002),
+(1010, 'Embedded Server Configuration',     1002),
+(1011, 'Application Properties & Profiles', 1002),
+(1012, 'Spring Boot Testing',               1002),
 
 -- Spring Core (1003)
-(1013, 'Introduction to Spring Core',      1003),
-(1014, 'Dependency Injection & IoC',       1003),
-(1015, 'Bean Lifecycle & Scopes',          1003),
-(1016, 'Spring AOP',                       1003),
+(1013, 'Introduction to Spring Core',       1003),
+(1014, 'Dependency Injection & IoC',        1003),
+(1015, 'Bean Lifecycle & Scopes',           1003),
+(1016, 'Spring AOP',                        1003),
 
 -- Spring MVC & REST (1004)
-(1017, 'Introduction to Spring MVC',       1004),
-(1018, 'REST Controllers & Mappings',      1004),
-(1019, 'Exception Handling in REST',       1004),
-(1020, 'Request & Response DTOs',          1004),
+(1017, 'Introduction to Spring MVC',        1004),
+(1018, 'REST Controllers & Mappings',       1004),
+(1019, 'Exception Handling in REST',        1004),
+(1020, 'Request & Response DTOs',           1004),
 
 -- Spring ORM & Data JPA (1005)
-(1021, 'Introduction to Spring Data JPA',  1005),
-(1022, 'Entity Relationships',             1005),
-(1023, 'JPQL & Native Queries',            1005),
-(1024, 'Transactions & Locking',           1005),
+(1021, 'Introduction to Spring Data JPA',   1005),
+(1022, 'Entity Relationships',              1005),
+(1023, 'JPQL & Native Queries',             1005),
+(1024, 'Transactions & Locking',            1005),
 
 -- Core Java (1006)
-(1025, 'Introduction to Core Java',        1006),
-(1026, 'OOP Concepts',                     1006),
-(1027, 'Collections Framework',            1006),
+(1025, 'Introduction to Core Java',           1006),
+(1026, 'OOP Concepts',                        1006),
+(1027, 'Collections Framework',               1006),
 (1028, 'Java 8+ Features (Streams, Lambdas)', 1006);
 
 -- ============================================================
 -- SEED DATA — Users
--- Passwords are BCrypt hashes.
---   admin       → admin123
---   SME users   → password123
+-- Plain text passwords (NoOpPasswordEncoder used in app)
 -- ============================================================
 
 INSERT IGNORE INTO users (enterprise_id, full_name, password, role, active) VALUES
-('admin',
- 'System Admin',
- 'admin123',  -- admin123
- 'ADMIN', 1),
-
-('gaurav.a.bhola',
- 'Gaurav Bhola',
- 'password123',  -- password123
- 'SME', 1),
-
-('birendra.kumar.singh',
- 'Birendra Kumar Singh',
- 'password123',  -- password123
- 'SME', 1),
-
-('divya.madhanasekar',
- 'Divya Madhanasekar',
- 'password123',  -- password123
- 'SME', 1),
-
-('swati.avinash.nikam',
- 'Swati Nikam',
- 'password123',  -- password123
- 'SME', 1),
-
-('indugu.hari.prasad',
- 'Indugu Hari Prasad',
- 'password123',  -- password123
- 'SME', 1);
+('admin',               'System Admin',         'admin123',    'ADMIN', 1),
+('gaurav.a.bhola',      'Gaurav Bhola',         'password123', 'SME',   1),
+('birendra.kumar.singh','Birendra Kumar Singh', 'password123', 'SME',   1),
+('divya.madhanasekar',  'Divya Madhanasekar',   'password123', 'SME',   1),
+('swati.avinash.nikam', 'Swati Nikam',          'password123', 'SME',   1),
+('indugu.hari.prasad',  'Indugu Hari Prasad',   'password123', 'SME',   1);
 
 -- ============================================================
--- SEED DATA — SME ↔ Stack Mappings
--- (from the master list in the ppt slide 16)
+-- SEED DATA — SME Stack Mappings
 -- ============================================================
 
 INSERT IGNORE INTO user_stack_mapping (enterprise_id, stack_id) VALUES

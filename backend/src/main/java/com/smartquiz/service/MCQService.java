@@ -32,8 +32,18 @@ public class MCQService {
         TechnologyStack stack = stackRepository.findById(req.getStackId()).orElseThrow();
         Topic topic = topicRepository.findById(req.getTopicId()).orElseThrow();
 
+        // Duplicate check
+        String normalizedStem = req.getQuestionStem().trim().replaceAll("\\s+", " ");
+        if (mcqRepository.existsByQuestionStemAndStackAndTopic(
+                normalizedStem, req.getStackId(), req.getTopicId())) {
+            throw new RuntimeException(
+                "Duplicate question: A question with the same stem already exists in this stack and topic.");
+        }
+
         MCQ mcq = new MCQ();
-        mcq.setQuestionStem(req.getQuestionStem());
+        mcq.setQuestionStem(normalizedStem);
+        mcq.setQuestionType(req.getQuestionType() != null ?
+                MCQ.QuestionType.valueOf(req.getQuestionType()) : MCQ.QuestionType.MCQ);
         mcq.setStack(stack);
         mcq.setTopic(topic);
         mcq.setDifficulty(MCQ.Difficulty.valueOf(req.getDifficulty()));
@@ -41,6 +51,8 @@ public class MCQService {
         mcq.setOptionB(req.getOptionB());
         mcq.setOptionC(req.getOptionC());
         mcq.setOptionD(req.getOptionD());
+        mcq.setOptionE(req.getOptionE());
+        mcq.setOptionF(req.getOptionF());
         mcq.setCorrectAnswer(req.getCorrectAnswer());
         mcq.setCreator(creator);
         mcq.setStatus(req.isSendForReview() ? MCQ.Status.READY_FOR_REVIEW : MCQ.Status.DRAFT);
@@ -67,7 +79,17 @@ public class MCQService {
         TechnologyStack stack = stackRepository.findById(req.getStackId()).orElseThrow();
         Topic topic = topicRepository.findById(req.getTopicId()).orElseThrow();
 
-        mcq.setQuestionStem(req.getQuestionStem());
+        // Duplicate check — exclude the current question being edited
+        String normalizedStem = req.getQuestionStem().trim().replaceAll("\\s+", " ");
+        if (mcqRepository.existsByQuestionStemAndStackAndTopicExcluding(
+                normalizedStem, req.getStackId(), req.getTopicId(), questionId)) {
+            throw new RuntimeException(
+                "Duplicate question: A question with the same stem already exists in this stack and topic.");
+        }
+
+        mcq.setQuestionStem(normalizedStem);
+        mcq.setQuestionType(req.getQuestionType() != null ?
+                MCQ.QuestionType.valueOf(req.getQuestionType()) : MCQ.QuestionType.MCQ);
         mcq.setStack(stack);
         mcq.setTopic(topic);
         mcq.setDifficulty(MCQ.Difficulty.valueOf(req.getDifficulty()));
@@ -75,7 +97,11 @@ public class MCQService {
         mcq.setOptionB(req.getOptionB());
         mcq.setOptionC(req.getOptionC());
         mcq.setOptionD(req.getOptionD());
+        mcq.setOptionE(req.getOptionE());
+        mcq.setOptionF(req.getOptionF());
         mcq.setCorrectAnswer(req.getCorrectAnswer());
+
+
         if (req.isSendForReview()) {
             mcq.setStatus(MCQ.Status.READY_FOR_REVIEW);
             mcq.setReviewerComments(null);
@@ -217,7 +243,7 @@ public class MCQService {
 
         // Validate header row
         Row headerRow = sheet.getRow(0);
-        String[] expectedHeaders = {"Stack_Name","Topic_Name","Difficulty","Question_Stem","Option_A","Option_B","Option_C","Option_D","Correct_Answer"};
+        String[] expectedHeaders = {"Stack_Name","Topic_Name","Difficulty","Question_Type","Question_Stem","Option_A","Option_B","Option_C","Option_D","Option_E","Option_F","Correct_Answer"};
         if (headerRow == null) {
             throw new RuntimeException("Header row is missing. Please download and use the provided template.");
         }
@@ -232,21 +258,27 @@ public class MCQService {
         }
 
         List<String> validDifficulties = List.of("Easy", "Medium", "Hard");
-        List<String> validAnswers = List.of("A", "B", "C", "D");
+        List<String> validAnswers = List.of("A", "B", "C", "D", "E", "F");
+
+        // Track stems seen within this file to catch intra-file duplicates
+        Set<String> seenInFile = new java.util.HashSet<>();
 
         for (int i = 1; i <= sheet.getLastRowNum(); i++) {
             Row row = sheet.getRow(i);
             if (row == null) continue;
 
-            String stackName  = getCellValue(row, 0);
-            String topicName  = getCellValue(row, 1);
-            String difficulty = getCellValue(row, 2);
-            String stem       = getCellValue(row, 3);
-            String optA       = getCellValue(row, 4);
-            String optB       = getCellValue(row, 5);
-            String optC       = getCellValue(row, 6);
-            String optD       = getCellValue(row, 7);
-            String correct    = getCellValue(row, 8);
+            String stackName    = getCellValue(row, 0);
+            String topicName    = getCellValue(row, 1);
+            String difficulty   = getCellValue(row, 2);
+            String questionType = getCellValue(row, 3);
+            String stem = getCellValue(row, 4).trim().replaceAll("\\s+", " ");
+            String optA         = getCellValue(row, 5);
+            String optB         = getCellValue(row, 6);
+            String optC         = getCellValue(row, 7);
+            String optD         = getCellValue(row, 8);
+            String optE         = getCellValue(row, 9);
+            String optF         = getCellValue(row, 10);
+            String correct      = getCellValue(row, 11);
 
             int rowNum = i + 1;
 
@@ -267,9 +299,27 @@ public class MCQService {
                 errors.add("Row " + rowNum + ": Invalid Difficulty '" + difficulty + "'. Must be Easy, Medium, or Hard.");
                 continue;
             }
-            if (!validAnswers.contains(correct)) {
-                errors.add("Row " + rowNum + ": Invalid Correct_Answer '" + correct + "'. Must be A, B, C, or D.");
-                continue;
+            if ("MSQ".equalsIgnoreCase(questionType)) {
+                String[] answers = correct.split(",");
+                if (answers.length < 2) {
+                    errors.add("Row " + rowNum + ": MSQ requires at least 2 correct answers separated by comma (e.g. A,C).");
+                    continue;
+                }
+                boolean allValid = true;
+                for (String ans : answers) {
+                    if (!validAnswers.contains(ans.trim())) {
+                        errors.add("Row " + rowNum + ": Invalid answer '" + ans.trim() + "' in Correct_Answer. Must be A, B, C, D, E or F.");
+                        allValid = false;
+                        break;
+                    }
+                }
+                if (!allValid) continue;
+            } 
+            else {
+                if (!validAnswers.contains(correct)) {
+                    errors.add("Row " + rowNum + ": Invalid Correct_Answer '" + correct + "'. Must be A, B, C, or D.");
+                    continue;
+                }
             }
 
             Optional<TechnologyStack> stackOpt = stackRepository.findByStackName(stackName);
@@ -287,15 +337,42 @@ public class MCQService {
                 continue;
             }
 
+            // Duplicate check
+            // Intra-file duplicate check
+            String fileKey = (stackOpt.get().getStackId() + "|" +
+                    topicOpt.get().getTopicId() + "|" +
+                    stem.trim().toLowerCase());
+            if (seenInFile.contains(fileKey)) {
+                errors.add("Row " + rowNum + ": Duplicate within this file — same question stem already appears earlier in this upload.");
+                continue;
+            }
+            seenInFile.add(fileKey);
+
+            // Database duplicate check
+            if (mcqRepository.existsByQuestionStemAndStackAndTopic(
+                    stem, stackOpt.get().getStackId(), topicOpt.get().getTopicId())) {
+                errors.add("Row " + rowNum + ": Duplicate question — '" +
+                    stem.substring(0, Math.min(stem.length(), 60)) + "...' already exists in this stack and topic.");
+                continue;
+            }
+
             MCQ mcq = new MCQ();
             mcq.setQuestionStem(stem);
             mcq.setStack(stackOpt.get());
             mcq.setTopic(topicOpt.get());
             mcq.setDifficulty(MCQ.Difficulty.valueOf(difficulty));
+            // Validate question type
+            MCQ.QuestionType qType = MCQ.QuestionType.MCQ;
+            if ("MSQ".equalsIgnoreCase(questionType)) {
+                qType = MCQ.QuestionType.MSQ;
+            }
+            mcq.setQuestionType(qType);
             mcq.setOptionA(optA);
             mcq.setOptionB(optB);
             mcq.setOptionC(optC);
             mcq.setOptionD(optD);
+            if (!optE.isBlank()) mcq.setOptionE(optE);
+            if (!optF.isBlank()) mcq.setOptionF(optF);
             mcq.setCorrectAnswer(correct);
             mcq.setCreator(creator);
             mcq.setStatus(MCQ.Status.DRAFT);
@@ -319,8 +396,9 @@ public class MCQService {
     public ResponseEntity<byte[]> downloadTemplate() throws IOException {
         try (Workbook workbook = new XSSFWorkbook()) {
             Sheet sheet = workbook.createSheet("MCQs");
-            String[] headers = {"Stack_Name", "Topic_Name", "Difficulty", "Question_Stem",
-                    "Option_A", "Option_B", "Option_C", "Option_D", "Correct_Answer"};
+            String[] headers = {"Stack_Name", "Topic_Name", "Difficulty", "Question_Type",
+                    "Question_Stem", "Option_A", "Option_B", "Option_C", "Option_D",
+                    "Option_E", "Option_F", "Correct_Answer"};
             Row headerRow = sheet.createRow(0);
             CellStyle style = workbook.createCellStyle();
             Font font = workbook.createFont();
@@ -334,20 +412,39 @@ public class MCQService {
             }
             // Sample row
             Row sample = sheet.createRow(1);
+            // MCQ sample row
             sample.createCell(0).setCellValue("Spring Boot");
             sample.createCell(1).setCellValue("Spring Boot Auto-Configuration");
             sample.createCell(2).setCellValue("Medium");
-            sample.createCell(3).setCellValue("What annotation enables auto-configuration in Spring Boot?");
-            sample.createCell(4).setCellValue("@Component");
-            sample.createCell(5).setCellValue("@EnableAutoConfiguration");
-            sample.createCell(6).setCellValue("@Configuration");
-            sample.createCell(7).setCellValue("@SpringBootApplication");
-            sample.createCell(8).setCellValue("B");
+            sample.createCell(3).setCellValue("MCQ");
+            sample.createCell(4).setCellValue("What annotation enables auto-configuration in Spring Boot?");
+            sample.createCell(5).setCellValue("@Component");
+            sample.createCell(6).setCellValue("@EnableAutoConfiguration");
+            sample.createCell(7).setCellValue("@Configuration");
+            sample.createCell(8).setCellValue("@SpringBootApplication");
+            sample.createCell(9).setCellValue("");   // Option E (blank for MCQ)
+            sample.createCell(10).setCellValue("");  // Option F (blank for MCQ)
+            sample.createCell(11).setCellValue("B");
+
+            // MSQ sample row
+            Row sample2 = sheet.createRow(2);
+            sample2.createCell(0).setCellValue("Core Java");
+            sample2.createCell(1).setCellValue("OOP Concepts");
+            sample2.createCell(2).setCellValue("Medium");
+            sample2.createCell(3).setCellValue("MSQ");
+            sample2.createCell(4).setCellValue("Which of the following are OOP principles?");
+            sample2.createCell(5).setCellValue("Inheritance");
+            sample2.createCell(6).setCellValue("Compilation");
+            sample2.createCell(7).setCellValue("Encapsulation");
+            sample2.createCell(8).setCellValue("Linking");
+            sample2.createCell(9).setCellValue("Polymorphism");
+            sample2.createCell(10).setCellValue("");  // Option F (blank)
+            sample2.createCell(11).setCellValue("A,C,E");
 
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             workbook.write(out);
             return ResponseEntity.ok()
-                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=Template_MCQs.xlsx")
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=template.xlsx")
                     .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
                     .body(out.toByteArray());
         }

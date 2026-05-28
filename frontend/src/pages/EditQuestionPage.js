@@ -34,7 +34,9 @@ export default function EditQuestionPage() {
       toast.success('Question updated!');
       goBack();
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to update');
+      const msg = err.response?.data?.message || 'Failed to update';
+      toast.error(msg.includes('duplicate') || msg.includes('Duplicate') ? '❌ ' + msg : msg,
+        { duration: msg.includes('uplicate') ? 5000 : 3000 });
     } finally { setLoading(false); }
   };
 
@@ -45,7 +47,9 @@ export default function EditQuestionPage() {
       toast.success('Question submitted for review!');
       goBack();
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to submit');
+      const msg = err.response?.data?.message || 'Failed to submit';
+      toast.error(msg.includes('duplicate') || msg.includes('Duplicate') ? '❌ ' + msg : msg,
+        { duration: msg.includes('uplicate') ? 5000 : 3000 });
     } finally { setLoading(false); }
   };
 
@@ -59,6 +63,7 @@ export default function EditQuestionPage() {
 
   const initial = {
     questionStem: mcq.questionStem,
+    questionType: mcq.questionType || 'MCQ',
     stackId: String(mcq.stackId),
     topicId: String(mcq.topicId),
     difficulty: mcq.difficulty,
@@ -66,6 +71,8 @@ export default function EditQuestionPage() {
     optionB: mcq.optionB,
     optionC: mcq.optionC,
     optionD: mcq.optionD,
+    optionE: mcq.optionE || '',
+    optionF: mcq.optionF || '',
     correctAnswer: mcq.correctAnswer,
   };
 

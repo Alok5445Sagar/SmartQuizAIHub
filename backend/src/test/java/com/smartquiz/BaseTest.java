@@ -65,13 +65,16 @@ public abstract class BaseTest {
 
     protected MCQ createMCQ(User creator, TechnologyStack stack, Topic topic, MCQ.Status status) {
         MCQ mcq = new MCQ();
-        mcq.setQuestionStem("What is " + stack.getStackName() + "?");
+        // Use unique stem per test to avoid duplicate conflicts
+        mcq.setQuestionStem("What is " + stack.getStackName() + " " +
+                System.nanoTime() + "?");
         mcq.setOptionA("Option A");
         mcq.setOptionB("Option B");
         mcq.setOptionC("Option C");
         mcq.setOptionD("Option D");
         mcq.setCorrectAnswer("A");
         mcq.setDifficulty(MCQ.Difficulty.Easy);
+        mcq.setQuestionType(MCQ.QuestionType.MCQ);
         mcq.setStack(stack);
         mcq.setTopic(topic);
         mcq.setCreator(creator);

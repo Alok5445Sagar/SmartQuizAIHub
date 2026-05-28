@@ -56,4 +56,30 @@ public interface MCQRepository extends JpaRepository<MCQ, Long> {
         @Param("search") String search,
         Pageable pageable
     );
+
+    @Query("""
+        SELECT COUNT(m) > 0 FROM MCQ m
+        WHERE LOWER(TRIM(m.questionStem)) = LOWER(TRIM(:questionStem))
+        AND m.stack.stackId = :stackId
+        AND m.topic.topicId = :topicId
+    """)
+    boolean existsByQuestionStemAndStackAndTopic(
+        @Param("questionStem") String questionStem,
+        @Param("stackId") Long stackId,
+        @Param("topicId") Long topicId
+    );
+
+    @Query("""
+        SELECT COUNT(m) > 0 FROM MCQ m
+        WHERE LOWER(TRIM(m.questionStem)) = LOWER(TRIM(:questionStem))
+        AND m.stack.stackId = :stackId
+        AND m.topic.topicId = :topicId
+        AND m.questionId != :excludeId
+    """)
+    boolean existsByQuestionStemAndStackAndTopicExcluding(
+        @Param("questionStem") String questionStem,
+        @Param("stackId") Long stackId,
+        @Param("topicId") Long topicId,
+        @Param("excludeId") Long excludeId
+    );
 }

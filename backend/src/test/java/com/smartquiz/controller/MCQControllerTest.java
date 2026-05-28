@@ -16,6 +16,7 @@ import java.util.Map;
 import static org.hamcrest.Matchers.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.hamcrest.Matchers.*;
 
 @AutoConfigureMockMvc
 @DisplayName("MCQ Controller Tests")
@@ -34,8 +35,8 @@ public class MCQControllerTest extends BaseTest {
         sme      = createSME("ctrl.sme", "Ctrl SME");
         admin    = createAdmin("ctrl.admin");
         reviewer = createSME("ctrl.reviewer", "Ctrl Reviewer");
-        stack    = createStack("Spring Core");
-        topic    = createTopic("IoC and DI", stack);
+        stack    = createStack("Test Stack Controller 66");
+        topic    = createTopic("Test Topic Controller 66", stack);
 
         UserStackMapping m = new UserStackMapping();
         m.setUser(reviewer); m.setStack(stack);
@@ -268,6 +269,108 @@ public class MCQControllerTest extends BaseTest {
                 .andExpect(jsonPath("$", hasSize(greaterThanOrEqualTo(1))));
     }
 
+    // ── DUPLICATE DETECTION ─────────────────────────────────
+
+@Test
+@DisplayName("POST /api/mcq rejects duplicate question stem in same stack and topic")
+void createMCQ_duplicate_returns400() throws Exception {
+    // Create first
+    mockMvc.perform(post("/api/mcq")
+            .header("Authorization", "Bearer " + smeToken)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(buildCreate(false))))
+            .andExpect(status().isOk());
+
+    // Try creating duplicate
+    mockMvc.perform(post("/api/mcq")
+            .header("Authorization", "Bearer " + smeToken)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(buildCreate(false))))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value(
+                containsString("Duplicate question")));
+}
+
+@Test
+@DisplayName("PUT /api/mcq/{id} rejects duplicate stem matching another question")
+void updateMCQ_duplicateStem_returns400() throws Exception {
+    // Create two questions
+    mockMvc.perform(post("/api/mcq")
+            .header("Authorization", "Bearer " + smeToken)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(buildCreate(false))))
+            .andExpect(status().isOk());
+
+    MCQ q2 = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+    q2.setQuestionStem("A different question?");
+    mcqRepository.save(q2);
+
+    // Try updating q2 to have same stem as q1
+    MCQDTO.UpdateRequest updateReq = new MCQDTO.UpdateRequest(
+        "Test question?", "MCQ",
+        stack.getStackId(), topic.getTopicId(), "Easy",
+        "Option A", "Option B", "Option C", "Option D", null, null, "A", false);
+
+    mockMvc.perform(put("/api/mcq/" + q2.getQuestionId())
+            .header("Authorization", "Bearer " + smeToken)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(updateReq)))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value(
+                containsString("Duplicate question")));
+}
+
+// ── MSQ CONTROLLER TESTS ─────────────────────────────────
+
+@Test
+@DisplayName("POST /api/mcq creates MSQ with multiple correct answers")
+void createMSQ_returnsCorrectType() throws Exception {
+    MCQDTO.CreateRequest req = new MCQDTO.CreateRequest(
+        "Which are OOP concepts?", "MSQ",
+        stack.getStackId(), topic.getTopicId(), "Medium",
+        "Inheritance", "Compilation", "Polymorphism", "Linking",
+        null, null, "A,C", false);
+
+    mockMvc.perform(post("/api/mcq")
+            .header("Authorization", "Bearer " + smeToken)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(req)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.questionType").value("MSQ"))
+            .andExpect(jsonPath("$.correctAnswer").value("A,C"))
+            .andExpect(jsonPath("$.status").value("DRAFT"));
+}
+
+@Test
+@DisplayName("POST /api/mcq MSQ with optionE and optionF saves correctly")
+void createMSQ_withSixOptions() throws Exception {
+    MCQDTO.CreateRequest req = new MCQDTO.CreateRequest(
+        "Which are valid access modifiers?", "MSQ",
+        stack.getStackId(), topic.getTopicId(), "Easy",
+        "public", "private", "protected", "default",
+        "internal", "external", "A,B,C,D", false);
+
+    mockMvc.perform(post("/api/mcq")
+            .header("Authorization", "Bearer " + smeToken)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(objectMapper.writeValueAsString(req)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.optionE").value("internal"))
+            .andExpect(jsonPath("$.optionF").value("external"))
+            .andExpect(jsonPath("$.correctAnswer").value("A,B,C,D"));
+}
+
+@Test
+@DisplayName("GET /api/mcq/{id} returns questionType field in response")
+void getMCQById_returnsQuestionType() throws Exception {
+    MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+
+    mockMvc.perform(get("/api/mcq/" + mcq.getQuestionId())
+            .header("Authorization", "Bearer " + smeToken))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.questionType").value("MCQ"));
+}
+
     // ── HELPERS ─────────────────────────────────────────────
 
     private String getToken(String id, String pass) throws Exception {
@@ -279,14 +382,14 @@ public class MCQControllerTest extends BaseTest {
     }
 
     private MCQDTO.CreateRequest buildCreate(boolean send) {
-        return new MCQDTO.CreateRequest("Test question?",
+        return new MCQDTO.CreateRequest("Test question?", "MCQ",
                 stack.getStackId(), topic.getTopicId(), "Easy",
-                "Option A", "Option B", "Option C", "Option D", "A", send);
-    }
+                "Option A", "Option B", "Option C", "Option D", null, null, "A", send);
+        }
 
-    private MCQDTO.UpdateRequest buildUpdate(String stem, boolean send) {
-        return new MCQDTO.UpdateRequest(stem,
+        private MCQDTO.UpdateRequest buildUpdate(String stem, boolean send) {
+        return new MCQDTO.UpdateRequest(stem, "MCQ",
                 stack.getStackId(), topic.getTopicId(), "Medium",
-                "Option A", "Option B", "Option C", "Option D", "B", send);
-    }
+                "Option A", "Option B", "Option C", "Option D", null, null, "B", send);
+        }
 }

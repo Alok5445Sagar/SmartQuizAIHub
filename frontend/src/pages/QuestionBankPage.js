@@ -5,6 +5,7 @@ import StatusBadge, { DifficultyBadge } from '../components/StatusBadge';
 import Pagination from '../components/Pagination';
 import ViewMCQModal from '../components/ViewMCQModal';
 import toast from 'react-hot-toast';
+import { QuestionTypeBadge } from '../components/StatusBadge';
 
 function AssignReviewerModal({ mcq, onClose, onDone }) {
   const [reviewers, setReviewers] = useState([]);
@@ -111,7 +112,9 @@ function AdminEditModal({ mcq, onClose, onDone }) {
       toast.success('Question updated!');
       onDone();
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to update');
+      const msg = err.response?.data?.message || 'Failed to update';
+      toast.error(msg.includes('uplicate') ? '❌ ' + msg : msg,
+        { duration: msg.includes('uplicate') ? 5000 : 3000 });
     } finally { setLoading(false); }
   };
 
@@ -122,12 +125,15 @@ function AdminEditModal({ mcq, onClose, onDone }) {
       toast.success('Question updated and sent for review!');
       onDone();
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to update');
+      const msg = err.response?.data?.message || 'Failed to update';
+      toast.error(msg.includes('uplicate') ? '❌ ' + msg : msg,
+        { duration: msg.includes('uplicate') ? 5000 : 3000 });
     } finally { setLoading(false); }
   };
 
   const initial = {
     questionStem: mcq.questionStem,
+    questionType: mcq.questionType || 'MCQ',
     stackId: String(mcq.stackId),
     topicId: String(mcq.topicId),
     difficulty: mcq.difficulty,
@@ -135,6 +141,8 @@ function AdminEditModal({ mcq, onClose, onDone }) {
     optionB: mcq.optionB,
     optionC: mcq.optionC,
     optionD: mcq.optionD,
+    optionE: mcq.optionE || '',
+    optionF: mcq.optionF || '',
     correctAnswer: mcq.correctAnswer,
   };
 
@@ -261,7 +269,7 @@ export default function QuestionBankPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Question Bank Management</h1>
-          <p className="page-subtitle">View all MCQs and assign reviewers</p>
+          <p className="page-subtitle">View all questions and assign reviewers</p>
         </div>
       </div>
 
@@ -348,6 +356,7 @@ export default function QuestionBankPage() {
                 <thead>
                   <tr>
                     <th>#</th>
+                    <th>Type</th>
                     <th>Question</th>
                     <th>Stack / Topic</th>
                     <th>Difficulty</th>
@@ -363,6 +372,7 @@ export default function QuestionBankPage() {
                       <td style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
                         {page * 10 + idx + 1}
                       </td>
+                      <td><QuestionTypeBadge type={mcq.questionType} /></td>
                       <td style={{ maxWidth: 260 }}>
                         <div style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', fontSize: 13, lineHeight: 1.5 }} title={mcq.questionStem}>
                           {mcq.questionStem}

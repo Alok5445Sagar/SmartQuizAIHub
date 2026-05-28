@@ -21,7 +21,12 @@ export default function AddQuestionPage() {
       toast.success('Question saved as Draft!');
       navigate('/my-questions');
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to save question');
+      const msg = err.response?.data?.message || 'Failed to save question';
+      if (msg.toLowerCase().includes('duplicate')) {
+        toast.error('❌ ' + msg, { duration: 5000 });
+      } else {
+        toast.error(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -34,7 +39,12 @@ export default function AddQuestionPage() {
       toast.success('Question submitted for review!');
       navigate('/my-questions');
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to submit question');
+      const msg = err.response?.data?.message || 'Failed to submit question';
+      if (msg.toLowerCase().includes('duplicate')) {
+        toast.error('❌ ' + msg, { duration: 5000 });
+      } else {
+        toast.error(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -74,7 +84,7 @@ export default function AddQuestionPage() {
       const url = URL.createObjectURL(new Blob([res.data]));
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'Template_MCQs.xlsx';
+      a.download = 'template.xlsx';
       a.click();
       URL.revokeObjectURL(url);
     } catch {
@@ -89,19 +99,19 @@ export default function AddQuestionPage() {
         <div className="page-header">
           <div>
             <h1 className="page-title">Add Question</h1>
-            <p className="page-subtitle">Choose how to add MCQs</p>
+            <p className="page-subtitle">Choose how to add questions</p>
           </div>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, maxWidth: 600 }}>
           <button onClick={() => setMode('single')} style={modeCardStyle}>
             <span style={{ fontSize: 40, display: 'block', marginBottom: 12 }}>✍️</span>
             <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Add from UI</h3>
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Create a single MCQ using the form</p>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Create a single question using the form</p>
           </button>
           <button onClick={() => setMode('bulk')} style={modeCardStyle}>
             <span style={{ fontSize: 40, display: 'block', marginBottom: 12 }}>📊</span>
             <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Bulk Upload</h3>
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Upload multiple MCQs via Excel file</p>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Upload multiple questions via Excel file</p>
           </button>
         </div>
       </div>
@@ -114,7 +124,7 @@ export default function AddQuestionPage() {
         <div className="page-header">
           <div>
             <h1 className="page-title">Add Single Question</h1>
-            <p className="page-subtitle">Fill in the MCQ details below</p>
+            <p className="page-subtitle">Fill in the question details below</p>
           </div>
           <button className="btn btn-ghost" onClick={() => setMode(null)}>← Back</button>
         </div>
@@ -131,7 +141,7 @@ export default function AddQuestionPage() {
         <div className="page-header">
           <div>
             <h1 className="page-title">Bulk Upload Questions</h1>
-            <p className="page-subtitle">Upload multiple MCQs using an Excel file</p>
+            <p className="page-subtitle">Upload multiple questions using an Excel file</p>
           </div>
           <button className="btn btn-ghost" onClick={() => setMode(null)}>← Back</button>
         </div>
@@ -139,10 +149,10 @@ export default function AddQuestionPage() {
         <div className="card" style={{ maxWidth: 560 }}>
           <div style={{ textAlign: 'center', marginBottom: 24 }}>
             <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
-              Download the template, fill in your MCQs, then upload the file.
+              Download the template, fill in your questions, then upload the file.
             </p>
             <button className="btn btn-secondary" onClick={handleDownloadTemplate}>
-              📥 Download Template (Template_MCQs.xlsx)
+              📥 Download Template (template.xlsx)
             </button>
           </div>
 

@@ -22,16 +22,36 @@ export default function ViewMCQModal({ mcq, onClose }) {
           </div>
 
           <div style={{ marginBottom: 16 }}>
-            <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 10 }}>OPTIONS</p>
-            <div className="options-grid">
-              {['A', 'B', 'C', 'D'].map(opt => (
-                <div key={opt} className={`option-item ${mcq.correctAnswer === opt ? 'correct' : ''}`}>
-                  <span className="option-label">{opt}</span>
-                  <span style={{ fontSize: 13 }}>{mcq[`option${opt}`]}</span>
-                  {mcq.correctAnswer === opt && <span style={{ marginLeft: 'auto', fontSize: 14 }}>✓</span>}
-                </div>
-              ))}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>OPTIONS</p>
+              <span style={{
+                fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 100,
+                background: mcq.questionType === 'MSQ' ? '#dbeafe' : '#ede9ff',
+                color: mcq.questionType === 'MSQ' ? '#1d4ed8' : '#5b21b6',
+              }}>
+                {mcq.questionType === 'MSQ' ? '☑️ MSQ' : '🔘 MCQ'}
+              </span>
             </div>
+              <div className="options-grid">
+                {['A', 'B', 'C', 'D', 'E', 'F'].map(opt => {
+                  const optValue = mcq[`option${opt}`];
+                  if (!optValue) return null;
+                  const correctAnswers = mcq.correctAnswer ? mcq.correctAnswer.split(',').map(s => s.trim()) : [];
+                  const isCorrect = correctAnswers.includes(opt);
+                  return (
+                    <div key={opt} className={`option-item ${isCorrect ? 'correct' : ''}`}>
+                      <span className="option-label">{opt}</span>
+                      <span style={{ fontSize: 13 }}>{optValue}</span>
+                      {isCorrect && <span style={{ marginLeft: 'auto', fontSize: 14 }}>✓</span>}
+                    </div>
+                  );
+                })}
+            </div>
+            {mcq.questionType === 'MSQ' && (
+              <p style={{ fontSize: 12, color: 'var(--success)', marginTop: 8 }}>
+                ✓ Correct answers: {mcq.correctAnswer}
+              </p>
+            )}
           </div>
 
           <div className="grid-2" style={{ fontSize: 13, marginBottom: 12 }}>

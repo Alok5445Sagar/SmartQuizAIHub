@@ -13,6 +13,7 @@ public class MCQDTO {
     @AllArgsConstructor
     public static class CreateRequest {
         private String questionStem;
+        private String questionType; // "MCQ" or "MSQ"
         private Long stackId;
         private Long topicId;
         private String difficulty;
@@ -20,7 +21,9 @@ public class MCQDTO {
         private String optionB;
         private String optionC;
         private String optionD;
-        private String correctAnswer;
+        private String optionE;
+        private String optionF;
+        private String correctAnswer; // "A" for MCQ, "A,C" for MSQ
         private boolean sendForReview;
     }
 
@@ -29,6 +32,7 @@ public class MCQDTO {
     @AllArgsConstructor
     public static class UpdateRequest {
         private String questionStem;
+        private String questionType;
         private Long stackId;
         private Long topicId;
         private String difficulty;
@@ -36,6 +40,8 @@ public class MCQDTO {
         private String optionB;
         private String optionC;
         private String optionD;
+        private String optionE;
+        private String optionF;
         private String correctAnswer;
         private boolean sendForReview;
     }
@@ -62,6 +68,10 @@ public class MCQDTO {
         private String reviewerComments;
         private LocalDateTime createdAt;
         private LocalDateTime updatedAt;
+        // In the Response class fields, add:
+        private String questionType;
+        private String optionE;
+        private String optionF;
 
         public static Response fromEntity(MCQ mcq) {
             Response r = new Response();
@@ -77,6 +87,9 @@ public class MCQDTO {
             r.setOptionC(mcq.getOptionC());
             r.setOptionD(mcq.getOptionD());
             r.setCorrectAnswer(mcq.getCorrectAnswer());
+            r.setQuestionType(mcq.getQuestionType() != null ? mcq.getQuestionType().name() : "MCQ");
+            r.setOptionE(mcq.getOptionE());
+            r.setOptionF(mcq.getOptionF());
             r.setStatus(mcq.getStatus().name());
             r.setCreatorEnterpriseId(mcq.getCreator().getEnterpriseId());
             r.setReviewerEnterpriseId(mcq.getReviewer() != null ? mcq.getReviewer().getEnterpriseId() : null);

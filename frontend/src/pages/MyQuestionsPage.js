@@ -4,6 +4,7 @@ import { mcqAPI, referenceAPI } from '../services/api';
 import StatusBadge, { DifficultyBadge } from '../components/StatusBadge';
 import Pagination from '../components/Pagination';
 import ViewMCQModal from '../components/ViewMCQModal';
+import { QuestionTypeBadge } from '../components/StatusBadge';
 
 export default function MyQuestionsPage() {
   const [data, setData] = useState(null);
@@ -90,7 +91,7 @@ export default function MyQuestionsPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">My Questions</h1>
-          <p className="page-subtitle">All MCQs created by you</p>
+          <p className="page-subtitle">All questions created by you</p>
         </div>
         <button className="btn btn-primary" onClick={() => navigate('/add-question')}>
           ➕ Add Question
@@ -164,7 +165,7 @@ export default function MyQuestionsPage() {
           <div className="empty-state">
             <div className="empty-icon">📝</div>
             <h3>No questions yet</h3>
-            <p>Create your first MCQ by clicking "Add Question"</p>
+            <p>Create your first question by clicking "Add Question"</p>
           </div>
         ) : filtered.length === 0 ? (
           <div className="empty-state">
@@ -179,6 +180,7 @@ export default function MyQuestionsPage() {
                 <thead>
                   <tr>
                     <th>#</th>
+                    <th>Type</th>
                     <th>Question</th>
                     <th>Stack</th>
                     <th>Topic</th>
@@ -193,6 +195,7 @@ export default function MyQuestionsPage() {
                       <td style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
                         {page * 10 + idx + 1}
                       </td>
+                      <td><QuestionTypeBadge type={mcq.questionType} /></td>
                       <td>
                         <div className="truncate" title={mcq.questionStem}>
                           {mcq.questionStem}

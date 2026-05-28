@@ -48,7 +48,8 @@ public class AdminController {
 
     @PutMapping("/edit-question/{id}")
     public ResponseEntity<?> editQuestion(@PathVariable Long id,
-                                        @RequestBody MCQDTO.UpdateRequest req) {
-        return ResponseEntity.ok(mcqService.updateMCQ("admin", id, req, true));
+                                        @RequestBody MCQDTO.UpdateRequest req,
+                                        org.springframework.security.core.Authentication authentication) {
+        return ResponseEntity.ok(mcqService.updateMCQ(authentication.getName(), id, req, true));
     }
 }

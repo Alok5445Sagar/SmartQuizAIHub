@@ -20,8 +20,8 @@ public class MCQRepositoryTest extends BaseTest {
     void setUp() {
         sme      = createSME("repo.sme",      "Repo SME");
         reviewer = createSME("repo.reviewer", "Repo Reviewer");
-        stack    = createStack("Core Java");
-        topic    = createTopic("Collections", stack);
+        stack    = createStack("Test Stack Unique 99");
+        topic    = createTopic("Test Topic Unique 99", stack);
     }
 
     @Test
@@ -86,8 +86,8 @@ public class MCQRepositoryTest extends BaseTest {
     @Test
     @DisplayName("findByCreatorWithFilters - filter by stackId")
     void findByCreatorWithFilters_stack() {
-        TechnologyStack stack2 = createStack("Spring Boot");
-        Topic topic2 = createTopic("Auto Config", stack2);
+        TechnologyStack stack2 = createStack("Another Unique Stack 88");
+        Topic topic2 = createTopic("Another Unique Topic 88", stack2);
 
         createMCQ(sme, stack,  topic,  MCQ.Status.DRAFT);
         createMCQ(sme, stack2, topic2, MCQ.Status.DRAFT);
@@ -160,4 +160,150 @@ public class MCQRepositoryTest extends BaseTest {
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getEnterpriseId()).isEqualTo(reviewer.getEnterpriseId());
     }
+
+    // ── DUPLICATE DETECTION ─────────────────────────────────
+
+@Test
+@DisplayName("existsByQuestionStemAndStackAndTopic returns true for existing stem")
+void existsByQuestionStemAndStackAndTopic_returnsTrue() {
+    MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+    mcq.setQuestionStem("Unique test question?");
+    mcqRepository.save(mcq);
+
+    boolean exists = mcqRepository.existsByQuestionStemAndStackAndTopic(
+            "Unique test question?", stack.getStackId(), topic.getTopicId());
+
+    assertThat(exists).isTrue();
+}
+
+@Test
+@DisplayName("existsByQuestionStemAndStackAndTopic returns false for different topic")
+void existsByQuestionStemAndStackAndTopic_differentTopic_returnsFalse() {
+    MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+    mcq.setQuestionStem("Unique test question?");
+    mcqRepository.save(mcq);
+
+    Topic differentTopic = createTopic("Different Topic", stack);
+
+    boolean exists = mcqRepository.existsByQuestionStemAndStackAndTopic(
+            "Unique test question?", stack.getStackId(), differentTopic.getTopicId());
+
+    assertThat(exists).isFalse();
+}
+
+@Test
+@DisplayName("existsByQuestionStemAndStackAndTopic is case insensitive")
+void existsByQuestionStemAndStackAndTopic_caseInsensitive() {
+    MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+    mcq.setQuestionStem("What is Java?");
+    mcqRepository.save(mcq);
+
+    boolean exists = mcqRepository.existsByQuestionStemAndStackAndTopic(
+            "WHAT IS JAVA?", stack.getStackId(), topic.getTopicId());
+
+    assertThat(exists).isTrue();
+}
+
+@Test
+@DisplayName("existsByQuestionStemAndStackAndTopicExcluding excludes self")
+void existsByQuestionStemExcluding_excludesSelf() {
+    MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+    mcq.setQuestionStem("Self reference question?");
+    mcqRepository.save(mcq);
+
+    // Should return false — excluding self
+    boolean exists = mcqRepository.existsByQuestionStemAndStackAndTopicExcluding(
+            "Self reference question?",
+            stack.getStackId(), topic.getTopicId(),
+            mcq.getQuestionId());
+
+    assertThat(exists).isFalse();
+}
+
+@Test
+@DisplayName("existsByQuestionStemAndStackAndTopicExcluding detects other duplicates")
+void existsByQuestionStemExcluding_detectsOtherDuplicate() {
+    MCQ mcq1 = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+    mcq1.setQuestionStem("Duplicate stem question?");
+    mcqRepository.save(mcq1);
+
+    MCQ mcq2 = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+    mcq2.setQuestionStem("Different question?");
+    mcqRepository.save(mcq2);
+
+    // mcq2 trying to use mcq1's stem — should return true
+    boolean exists = mcqRepository.existsByQuestionStemAndStackAndTopicExcluding(
+            "Duplicate stem question?",
+            stack.getStackId(), topic.getTopicId(),
+            mcq2.getQuestionId());
+
+    assertThat(exists).isTrue();
+}
+
+// ── MSQ REPOSITORY TESTS ─────────────────────────────────
+
+@Test
+@DisplayName("MCQ saved with MSQ type returns correct questionType")
+void savedMSQ_returnsCorrectType() {
+    MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+    mcq.setQuestionType(MCQ.QuestionType.MSQ);
+    mcq.setCorrectAnswer("A,C");
+    mcq.setOptionE("Option E");
+    mcqRepository.save(mcq);
+
+    MCQ found = mcqRepository.findById(mcq.getQuestionId()).orElseThrow();
+    assertThat(found.getQuestionType()).isEqualTo(MCQ.QuestionType.MSQ);
+    assertThat(found.getCorrectAnswer()).isEqualTo("A,C");
+    assertThat(found.getOptionE()).isEqualTo("Option E");
+}
+
+@Test
+@DisplayName("MSQ with optionF saves and retrieves correctly")
+void savedMSQ_withOptionF_retrievesCorrectly() {
+    MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+    mcq.setQuestionType(MCQ.QuestionType.MSQ);
+    mcq.setOptionE("Option E value");
+    mcq.setOptionF("Option F value");
+    mcq.setCorrectAnswer("A,B,E,F");
+    mcqRepository.save(mcq);
+
+    MCQ found = mcqRepository.findById(mcq.getQuestionId()).orElseThrow();
+    assertThat(found.getOptionF()).isEqualTo("Option F value");
+    assertThat(found.getCorrectAnswer()).isEqualTo("A,B,E,F");
+}
+
+@Test
+@DisplayName("findByCreatorWithFilters returns both MCQ and MSQ questions")
+void findByCreatorWithFilters_returnsBothTypes() {
+    MCQ mcqQ = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+
+    MCQ msqQ = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+    msqQ.setQuestionStem("MSQ specific question?");
+    msqQ.setQuestionType(MCQ.QuestionType.MSQ);
+    msqQ.setCorrectAnswer("A,B");
+    mcqRepository.save(msqQ);
+
+    Page<MCQ> result = mcqRepository.findByCreatorWithFilters(
+            sme.getEnterpriseId(), null, null, null, null,
+            PageRequest.of(0, 10));
+
+    assertThat(result.getTotalElements()).isEqualTo(2);
+}
+
+@Test
+@DisplayName("Duplicate check works for MSQ question type")
+void duplicateCheck_worksForMSQ() {
+    MCQ msq = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+    msq.setQuestionStem("MSQ duplicate test question?");
+    msq.setQuestionType(MCQ.QuestionType.MSQ);
+    mcqRepository.save(msq);
+
+    boolean exists = mcqRepository.existsByQuestionStemAndStackAndTopic(
+            "MSQ duplicate test question?",
+            stack.getStackId(), topic.getTopicId());
+
+    assertThat(exists).isTrue();
+}
+
+
 }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { mcqAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
-import { DifficultyBadge } from '../components/StatusBadge';
+import { DifficultyBadge, QuestionTypeBadge } from '../components/StatusBadge';
 import Pagination from '../components/Pagination';
 import ViewMCQModal from '../components/ViewMCQModal';
 import toast from 'react-hot-toast';
@@ -41,14 +41,27 @@ function ReviewModal({ mcq, onClose, onDone }) {
             </div>
             <p style={{ fontSize: 14, lineHeight: 1.6, marginBottom: 12 }}>{mcq.questionStem}</p>
             <div className="options-grid">
-              {['A','B','C','D'].map(opt => (
-                <div key={opt} className={`option-item ${mcq.correctAnswer === opt ? 'correct' : ''}`}>
-                  <span className="option-label">{opt}</span>
-                  <span style={{ fontSize: 12 }}>{mcq[`option${opt}`]}</span>
-                  {mcq.correctAnswer === opt && <span style={{ marginLeft: 'auto' }}>✓</span>}
-                </div>
-              ))}
-            </div>
+                {['A','B','C','D','E','F'].map(opt => {
+                  const optValue = mcq[`option${opt}`];
+                  if (!optValue) return null;
+                  const correctAnswers = mcq.correctAnswer
+                    ? mcq.correctAnswer.split(',').map(s => s.trim())
+                    : [];
+                  const isCorrect = correctAnswers.includes(opt);
+                  return (
+                    <div key={opt} className={`option-item ${isCorrect ? 'correct' : ''}`}>
+                      <span className="option-label">{opt}</span>
+                      <span style={{ fontSize: 12 }}>{optValue}</span>
+                      {isCorrect && <span style={{ marginLeft: 'auto' }}>✓</span>}
+                    </div>
+                  );
+                })}
+              </div>
+              {mcq.questionType === 'MSQ' && (
+                <p style={{ fontSize: 11, color: 'var(--success)', marginTop: 6 }}>
+                  ✓ Correct answers: {mcq.correctAnswer}
+                </p>
+              )}
           </div>
 
           {/* Action */}
@@ -125,7 +138,7 @@ export default function MyPendingReviewsPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">My Pending Reviews</h1>
-          <p className="page-subtitle">MCQs assigned to you for review</p>
+          <p className="page-subtitle">Questions assigned to you for review</p>
         </div>
         {data && (
           <div style={{ background: 'var(--warning-light)', color: '#92400e', padding: '6px 14px', borderRadius: 100, fontSize: 13, fontWeight: 600 }}>
@@ -141,7 +154,7 @@ export default function MyPendingReviewsPage() {
           <div className="empty-state">
             <div className="empty-icon">🎉</div>
             <h3>No pending reviews</h3>
-            <p>You're all caught up! No MCQs assigned for review.</p>
+            <p>You're all caught up! No questions assigned for review.</p>
           </div>
         ) : (
           <>
@@ -150,6 +163,7 @@ export default function MyPendingReviewsPage() {
                 <thead>
                   <tr>
                     <th>#</th>
+                    <th>Type</th>
                     <th>Question</th>
                     <th>Stack</th>
                     <th>Topic</th>
@@ -165,6 +179,7 @@ export default function MyPendingReviewsPage() {
                       <td style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
                         {page * 10 + idx + 1}
                       </td>
+                      <td><QuestionTypeBadge type={mcq.questionType} /></td>
                       <td>
                         <div className="truncate" style={{ maxWidth: 260 }} title={mcq.questionStem}>
                           {mcq.questionStem}

@@ -24,6 +24,10 @@ public class MCQ {
     @Column(name = "question_stem", nullable = false, columnDefinition = "TEXT")
     private String questionStem;
 
+    @Column(name = "question_type", nullable = false)
+    @Enumerated(EnumType.STRING)
+    private QuestionType questionType = QuestionType.MCQ;
+
     @Column(name = "option_a", nullable = false)
     private String optionA;
 
@@ -36,8 +40,16 @@ public class MCQ {
     @Column(name = "option_d", nullable = false)
     private String optionD;
 
+    @Column(name = "option_e")
+    private String optionE;
+
+    @Column(name = "option_f")
+    private String optionF;
+
+    // For MCQ: single letter e.g. "A"
+    // For MSQ: comma-separated e.g. "A,C" or "B,D,E"
     @Column(name = "correct_answer", nullable = false)
-    private String correctAnswer; // A, B, C, or D
+    private String correctAnswer;
 
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)
@@ -80,5 +92,9 @@ public class MCQ {
 
     public enum Status {
         DRAFT, READY_FOR_REVIEW, UNDER_REVIEW, APPROVED, REJECTED
+    }
+
+    public enum QuestionType {
+        MCQ, MSQ
     }
 }

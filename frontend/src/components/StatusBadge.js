@@ -30,3 +30,16 @@ export function DifficultyBadge({ difficulty }) {
     </span>
   );
 }
+
+
+export function QuestionTypeBadge({ type }) {
+  const isMSQ = type === 'MSQ';
+  return (
+    <span className="badge" style={{
+      background: isMSQ ? '#dbeafe' : '#ede9ff',
+      color: isMSQ ? '#1d4ed8' : '#5b21b6',
+    }}>
+      {isMSQ ? '☑️ MSQ' : '🔘 MCQ'}
+    </span>
+  );
+}

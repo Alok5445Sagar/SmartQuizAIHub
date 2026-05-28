@@ -34,7 +34,7 @@ public class DataInitializer implements CommandLineRunner {
         // Create Topics for Spring Cloud
         TechnologyStack springCloud = stacks.get("Spring Cloud");
         createTopic("Introduction to Spring Cloud", springCloud);
-        createTopic("Service Discovery design pattern – Eureka Server & Discovery Client", springCloud);
+        createTopic("Service Discovery design pattern - Eureka Server & Discovery Client", springCloud);
         createTopic("Eureka Heartbeats & Self Preservation", springCloud);
         createTopic("Spring Cloud Loadbalancer", springCloud);
         createTopic("Spring Cloud OpenFeign", springCloud);
@@ -69,11 +69,11 @@ public class DataInitializer implements CommandLineRunner {
 
         // Create SME users from the master list
         Map<String, String[]> smeData = new LinkedHashMap<>();
-        smeData.put("gaurav.a.bhola", new String[]{"Gaurav Bhola", "Spring Cloud", "Spring Core"});
-        smeData.put("birendra.kumar.singh", new String[]{"Birendra Kumar Singh", "Spring Boot"});
-        smeData.put("divya.madhanasekar", new String[]{"Divya Madhanasekar", "Spring MVC & REST", "Spring Cloud"});
-        smeData.put("swati.avinash.nikam", new String[]{"Swati Nikam", "Spring Boot"});
-        smeData.put("indugu.hari.prasad", new String[]{"Indugu Hari Prasad", "Spring Cloud"});
+        smeData.put("gaurav.a.bhola",        new String[]{"Gaurav Bhola",          "Spring Cloud", "Spring Boot", "Core Java"});
+        smeData.put("birendra.kumar.singh",   new String[]{"Birendra Kumar Singh",  "Spring Boot",  "Spring Core", "Spring Cloud"});
+        smeData.put("divya.madhanasekar",     new String[]{"Divya Madhanasekar",    "Spring Core",  "Spring MVC & REST"});
+        smeData.put("swati.avinash.nikam",    new String[]{"Swati Nikam",           "Spring MVC & REST", "Spring ORM & Data JPA"});
+        smeData.put("indugu.hari.prasad",     new String[]{"Indugu Hari Prasad",    "Spring ORM & Data JPA", "Core Java"});
 
         for (Map.Entry<String, String[]> entry : smeData.entrySet()) {
             String eid = entry.getKey();

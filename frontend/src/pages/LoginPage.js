@@ -36,11 +36,11 @@ export default function LoginPage() {
           </div>
           <h1 style={styles.headline}>Centralized Quiz<br/>Management Platform</h1>
           <p style={styles.subheading}>
-            Create, review, and manage MCQs with an AI-powered workflow 
+            Create, review, and manage questions with an AI-powered workflow 
             built for Subject Matter Experts and Admins.
           </p>
           <div style={styles.features}>
-            {['MCQ Creation & Bulk Upload', 'Lifecycle Status Tracking', 'Review & Approval Workflow', 'Question Bank Management'].map(f => (
+            {['Question Creation & Bulk Upload', 'Lifecycle Status Tracking', 'Review & Approval Workflow', 'Question Bank Management'].map(f => (
               <div key={f} style={styles.feature}>
                 <span style={styles.featureCheck}>✓</span>
                 <span>{f}</span>
