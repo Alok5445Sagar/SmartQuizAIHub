@@ -361,7 +361,7 @@ export default function QuestionBankPage() {
                   {content.map((mcq, idx) => (
                     <tr key={mcq.questionId}>
                       <td style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
-                        {mcq.questionId}
+                        {page * 10 + idx + 1}
                       </td>
                       <td style={{ maxWidth: 260 }}>
                         <div style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', fontSize: 13, lineHeight: 1.5 }} title={mcq.questionStem}>

@@ -115,7 +115,8 @@ public class MCQService {
             int page, int size,
             Long stackId, Long topicId, String difficulty, String status, String search) {
 
-        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        Pageable pageable = PageRequest.of(page, size,
+                Sort.by("updatedAt").descending().and(Sort.by("createdAt").descending()));
 
         MCQ.Difficulty difficultyEnum = null;
         if (difficulty != null && !difficulty.isBlank()) {

@@ -170,12 +170,17 @@ INSERT IGNORE INTO users (enterprise_id, full_name, password, role, active) VALU
 
 INSERT IGNORE INTO user_stack_mapping (enterprise_id, stack_id) VALUES
 ('gaurav.a.bhola',       1001),   -- Spring Cloud
-('gaurav.a.bhola',       1003),   -- Spring Core
+('gaurav.a.bhola',       1002),   -- Spring Boot
+('gaurav.a.bhola',       1006),   -- Core Java
 ('birendra.kumar.singh', 1002),   -- Spring Boot
+('birendra.kumar.singh', 1003),   -- Spring Core
+('birendra.kumar.singh', 1001),   -- Spring Cloud
+('divya.madhanasekar',   1003),   -- Spring Core
 ('divya.madhanasekar',   1004),   -- Spring MVC & REST
-('divya.madhanasekar',   1001),   -- Spring Cloud
-('swati.avinash.nikam',  1002),   -- Spring Boot
-('indugu.hari.prasad',   1001);   -- Spring Cloud
+('swati.avinash.nikam',  1004),   -- Spring MVC & REST
+('swati.avinash.nikam',  1005),   -- Spring ORM & Data JPA
+('indugu.hari.prasad',   1005),   -- Spring ORM & Data JPA
+('indugu.hari.prasad',   1006);   -- Core Java
 
 -- ============================================================
 -- DONE
