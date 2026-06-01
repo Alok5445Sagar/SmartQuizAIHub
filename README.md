@@ -431,5 +431,5 @@ This project was built as part of the **Hack-N-Stack: Code the Future — Java F
 ---
 
 <div align="center">
-Built with ❤️ for Smart Quiz AI Hub
+Built with ❤️ 
 </div>
