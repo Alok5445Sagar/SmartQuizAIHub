@@ -116,6 +116,44 @@ public class MCQServiceTest extends BaseTest {
         assertThat(r.getQuestionStem()).isEqualTo("Admin fix?");
     }
 
+    @Test
+    @DisplayName("Admin can update UNDER_REVIEW question")
+    void updateMCQ_adminCanUpdateUnderReview() {
+        MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.UNDER_REVIEW);
+        MCQDTO.Response r = mcqService.updateMCQ(
+                admin.getEnterpriseId(), mcq.getQuestionId(), buildUpdate("Admin fix under review?", false), true);
+        assertThat(r.getQuestionStem()).isEqualTo("Admin fix under review?");
+    }
+
+    @Test
+    @DisplayName("Admin can update APPROVED question")
+    void updateMCQ_adminCanUpdateApproved() {
+        MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.APPROVED);
+        MCQDTO.Response r = mcqService.updateMCQ(
+                admin.getEnterpriseId(), mcq.getQuestionId(), buildUpdate("Admin fix approved?", false), true);
+        assertThat(r.getQuestionStem()).isEqualTo("Admin fix approved?");
+    }
+
+    @Test
+    @DisplayName("Admin can update REJECTED question")
+    void updateMCQ_adminCanUpdateRejected() {
+        MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.REJECTED);
+        MCQDTO.Response r = mcqService.updateMCQ(
+                admin.getEnterpriseId(), mcq.getQuestionId(), buildUpdate("Admin fix rejected?", false), true);
+        assertThat(r.getQuestionStem()).isEqualTo("Admin fix rejected?");
+    }
+
+    @Test
+    @DisplayName("Admin cannot update DRAFT question")
+    void updateMCQ_adminCannotUpdateDraft() {
+        MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+        assertThatThrownBy(() ->
+            mcqService.updateMCQ(admin.getEnterpriseId(), mcq.getQuestionId(),
+                    buildUpdate("Admin hack draft?", false), true))
+            .isInstanceOf(RuntimeException.class)
+            .hasMessageContaining("Admin cannot edit DRAFT");
+    }
+
     // ── REVIEW ──────────────────────────────────────────────
 
     @Test

@@ -67,13 +67,19 @@ public class MCQService {
         if (!isAdmin && !mcq.getCreator().getEnterpriseId().equals(updaterId)) {
             throw new RuntimeException("Not authorized to edit this MCQ");
         }
-        if (!isAdmin && mcq.getStatus() != MCQ.Status.DRAFT && mcq.getStatus() != MCQ.Status.REJECTED) {
-            throw new RuntimeException("Can only edit DRAFT or REJECTED questions");
-        }
-        if (isAdmin && mcq.getStatus() != MCQ.Status.DRAFT
-                && mcq.getStatus() != MCQ.Status.REJECTED
-                && mcq.getStatus() != MCQ.Status.READY_FOR_REVIEW) {
-            throw new RuntimeException("Admin can only edit DRAFT, REJECTED or READY_FOR_REVIEW questions");
+        if (!isAdmin) {
+            // SME can only edit their own DRAFT or REJECTED questions
+            if (!mcq.getCreator().getEnterpriseId().equals(updaterId)) {
+                throw new RuntimeException("Not authorized to edit this MCQ");
+            }
+            if (mcq.getStatus() != MCQ.Status.DRAFT && mcq.getStatus() != MCQ.Status.REJECTED) {
+                throw new RuntimeException("Can only edit DRAFT or REJECTED questions");
+            }
+        } else {
+            // Admin can edit any status EXCEPT DRAFT
+            if (mcq.getStatus() == MCQ.Status.DRAFT) {
+                throw new RuntimeException("Admin cannot edit DRAFT questions. Only the creator can edit a DRAFT.");
+            }
         }
 
         TechnologyStack stack = stackRepository.findById(req.getStackId()).orElseThrow();

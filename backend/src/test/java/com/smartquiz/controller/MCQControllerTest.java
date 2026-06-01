@@ -199,6 +199,57 @@ public class MCQControllerTest extends BaseTest {
                 .andExpect(jsonPath("$.totalElements").value(1));
     }
 
+    @Test
+    @DisplayName("Admin can edit UNDER_REVIEW question")
+    void adminEdit_underReview_succeeds() throws Exception {
+        MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.UNDER_REVIEW);
+
+        mockMvc.perform(put("/api/admin/edit-question/" + mcq.getQuestionId())
+                .header("Authorization", "Bearer " + adminToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(buildUpdate("Admin edited under review?", false))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.questionStem").value("Admin edited under review?"));
+    }
+
+    @Test
+    @DisplayName("Admin can edit APPROVED question")
+    void adminEdit_approved_succeeds() throws Exception {
+        MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.APPROVED);
+
+        mockMvc.perform(put("/api/admin/edit-question/" + mcq.getQuestionId())
+                .header("Authorization", "Bearer " + adminToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(buildUpdate("Admin edited approved?", false))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.questionStem").value("Admin edited approved?"));
+    }
+
+    @Test
+    @DisplayName("Admin cannot edit DRAFT question")
+    void adminEdit_draft_returns400() throws Exception {
+        MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+
+        mockMvc.perform(put("/api/admin/edit-question/" + mcq.getQuestionId())
+                .header("Authorization", "Bearer " + adminToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(buildUpdate("Admin hack draft?", false))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(containsString("Admin cannot edit DRAFT")));
+    }
+
+    @Test
+    @DisplayName("SME cannot edit READY_FOR_REVIEW question")
+    void smeEdit_readyForReview_returnsError() throws Exception {
+        MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.READY_FOR_REVIEW);
+
+        mockMvc.perform(put("/api/mcq/" + mcq.getQuestionId())
+                .header("Authorization", "Bearer " + smeToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(buildUpdate("SME hack?", false))))
+                .andExpect(status().isBadRequest());
+    }
+
     // ── ADMIN ENDPOINTS ─────────────────────────────────────
 
     @Test

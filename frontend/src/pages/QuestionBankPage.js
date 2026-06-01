@@ -253,6 +253,7 @@ export default function QuestionBankPage() {
   }, [searchInput]);
 
   const canAssign = (status) => status === 'READY_FOR_REVIEW';
+  const canAdminEdit = (status) => status !== 'DRAFT';
 
   const content = data?.content || [];
 
@@ -400,7 +401,7 @@ export default function QuestionBankPage() {
                               👤 Assign
                             </button>
                           )}
-                          {mcq.status === 'READY_FOR_REVIEW' && (
+                          {canAdminEdit(mcq.status) && (
                             <button className="btn btn-secondary btn-sm" onClick={() => setEditMCQ(mcq)}>
                               ✏️ Edit
                             </button>
