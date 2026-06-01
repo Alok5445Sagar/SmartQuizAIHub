@@ -18,7 +18,7 @@
 
 ## 📋 Overview
 
-Smart Quiz AI Hub is a full-stack web application built for the **L&TT (Learning and Talent Transformation)** team. It streamlines the creation, review, and management of quiz questions (MCQ & MSQ) through a structured lifecycle workflow with role-based access for SMEs and Admins.
+Smart Quiz AI Hub is a full-stack web application. It streamlines the creation, review, and management of quiz questions (MCQ & MSQ) through a structured lifecycle workflow with role-based access for SMEs and Admins.
 
 ---
 
