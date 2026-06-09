@@ -5,7 +5,9 @@ const DIFFICULTIES = ['Easy', 'Medium', 'Hard'];
 const ALL_OPTIONS = ['A', 'B', 'C', 'D', 'E', 'F'];
 const MCQ_OPTIONS = ['A', 'B', 'C', 'D'];
 
-export default function MCQForm({ initial = {}, onSave, onSaveAndSend, loading, isEdit = false, rejectedComments }) {
+export default function MCQForm({ initial = {}, onSave, onSaveAndSend, onDuplicateCheck,
+                                   loading, checkingDuplicate = false, isEdit = false,
+                                   rejectedComments, showDuplicateCheck = false }) {
   const [stacks, setStacks] = useState([]);
   const [topics, setTopics] = useState([]);
   const [form, setForm] = useState({
@@ -318,11 +320,37 @@ export default function MCQForm({ initial = {}, onSave, onSaveAndSend, loading, 
       <div className="divider" />
 
       <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-        <button className="btn btn-secondary" onClick={handleSave} disabled={loading}>
-          {loading === 'save' ? <><span className="spinner spinner-dark" /> Saving...</> : '💾 Save as Draft'}
+        <button
+          className="btn btn-secondary"
+          onClick={handleSave}
+          disabled={loading || checkingDuplicate}
+        >
+          {loading === 'save'
+            ? <><span className="spinner spinner-dark" /> Saving...</>
+            : '💾 Save as Draft'}
         </button>
-        <button className="btn btn-primary" onClick={handleSaveAndSend} disabled={loading}>
-          {loading === 'send' ? <><span className="spinner" /> Submitting...</> : '🚀 Save & Send for Review'}
+        {showDuplicateCheck && (
+          <button
+            className="btn btn-secondary"
+            style={{ borderColor: '#f59e0b', color: '#92400e', background: '#fef3c7' }}
+            onClick={() => onDuplicateCheck && onDuplicateCheck(form)}
+            disabled={loading || checkingDuplicate}
+          >
+            {checkingDuplicate
+              ? <><span className="spinner spinner-dark" /> Checking...</>
+              : '🔍 Duplicate Check'}
+          </button>
+        )}
+        <button
+          className="btn btn-primary"
+          onClick={handleSaveAndSend}
+          disabled={loading || checkingDuplicate}
+        >
+          {checkingDuplicate
+            ? <><span className="spinner" /> Checking similarity...</>
+            : loading === 'send'
+              ? <><span className="spinner" /> Submitting...</>
+              : '🚀 Save & Send for Review'}
         </button>
       </div>
     </div>

@@ -1,22 +1,33 @@
 package com.smartquiz.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.smartquiz.BaseTest;
-import com.smartquiz.dto.AuthDTO;
-import com.smartquiz.dto.MCQDTO;
-import com.smartquiz.entity.*;
-import org.junit.jupiter.api.*;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
+import static org.hamcrest.Matchers.hasSize;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.util.Map;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.util.Map;
-
-import static org.hamcrest.Matchers.*;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
-import static org.hamcrest.Matchers.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.smartquiz.BaseTest;
+import com.smartquiz.dto.AuthDTO;
+import com.smartquiz.dto.MCQDTO;
+import com.smartquiz.entity.MCQ;
+import com.smartquiz.entity.TechnologyStack;
+import com.smartquiz.entity.Topic;
+import com.smartquiz.entity.User;
+import com.smartquiz.entity.UserStackMapping;
 
 @AutoConfigureMockMvc
 @DisplayName("MCQ Controller Tests")
@@ -380,7 +391,7 @@ void createMSQ_returnsCorrectType() throws Exception {
         "Which are OOP concepts?", "MSQ",
         stack.getStackId(), topic.getTopicId(), "Medium",
         "Inheritance", "Compilation", "Polymorphism", "Linking",
-        null, null, "A,C", false);
+        null, null, "A,C", false, false);
 
     mockMvc.perform(post("/api/mcq")
             .header("Authorization", "Bearer " + smeToken)
@@ -399,7 +410,7 @@ void createMSQ_withSixOptions() throws Exception {
         "Which are valid access modifiers?", "MSQ",
         stack.getStackId(), topic.getTopicId(), "Easy",
         "public", "private", "protected", "default",
-        "internal", "external", "A,B,C,D", false);
+        "internal", "external", "A,B,C,D", false, false);
 
     mockMvc.perform(post("/api/mcq")
             .header("Authorization", "Bearer " + smeToken)
@@ -435,8 +446,8 @@ void getMCQById_returnsQuestionType() throws Exception {
     private MCQDTO.CreateRequest buildCreate(boolean send) {
         return new MCQDTO.CreateRequest("Test question?", "MCQ",
                 stack.getStackId(), topic.getTopicId(), "Easy",
-                "Option A", "Option B", "Option C", "Option D", null, null, "A", send);
-        }
+                "Option A", "Option B", "Option C", "Option D", null, null, "A", send, false);
+    }
 
         private MCQDTO.UpdateRequest buildUpdate(String stem, boolean send) {
         return new MCQDTO.UpdateRequest(stem, "MCQ",

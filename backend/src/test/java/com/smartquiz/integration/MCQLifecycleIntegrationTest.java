@@ -60,7 +60,7 @@ public class MCQLifecycleIntegrationTest extends BaseTest {
                     "What is REST?", "MCQ",
                     stack.getStackId(), topic.getTopicId(), "Easy",
                     "A protocol", "An architectural style", "A framework", "A database",
-                    null, null, "B", false))))
+                    null, null, "B", false, false))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("DRAFT"))
                 .andReturn();
@@ -113,7 +113,7 @@ public class MCQLifecycleIntegrationTest extends BaseTest {
                     "What is Spring?", "MCQ",
                     stack.getStackId(), topic.getTopicId(), "Medium",
                     "A season", "A framework", "A database", "A cloud",
-                    null, null, "B", true))))
+                    null, null, "B", true, false))))
                 .andExpect(status().isOk())
                 .andReturn();
 
@@ -219,7 +219,7 @@ public class MCQLifecycleIntegrationTest extends BaseTest {
                 .content(mapper.writeValueAsString(new MCQDTO.CreateRequest(
                         "What is REST?", "MCQ",
                         stack.getStackId(), topic.getTopicId(), "Easy",
-                        "Protocol", "Style", "Framework", "Database", null, null, "B", false))))
+                        "Protocol", "Style", "Framework", "Database", null, null, "B", false, false))))
                 .andExpect(status().isOk());
 
         // Try creating same question again
@@ -229,7 +229,7 @@ public class MCQLifecycleIntegrationTest extends BaseTest {
                 .content(mapper.writeValueAsString(new MCQDTO.CreateRequest(
                         "What is REST?", "MCQ",
                         stack.getStackId(), topic.getTopicId(), "Hard",
-                        "A", "B", "C", "D", null, null, "A", false))))
+                        "A", "B", "C", "D", null, null, "A", false, false))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value(containsString("Duplicate")));
         }
@@ -249,7 +249,7 @@ void msqLifecycle_draftToApproved() throws Exception {
                     stack.getStackId(), topic.getTopicId(), "Medium",
                     "spring-boot-starter-web", "spring-boot-starter-xyz",
                     "spring-boot-starter-test", "spring-boot-starter-data-jpa",
-                    null, null, "A,C,D", true))))
+                    null, null, "A,C,D", true, false))))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.questionType").value("MSQ"))
             .andExpect(jsonPath("$.correctAnswer").value("A,C,D"))
@@ -295,7 +295,7 @@ void duplicate_rejectedAcrossAllFlows() throws Exception {
                     "What is dependency injection?", "MCQ",
                     stack.getStackId(), topic.getTopicId(), "Easy",
                     "A design pattern", "A database", "A server", "A framework",
-                    null, null, "A", false))))
+                    null, null, "A", false, false))))
             .andExpect(status().isOk());
 
     // Same SME tries to add duplicate
@@ -306,7 +306,7 @@ void duplicate_rejectedAcrossAllFlows() throws Exception {
                     "What is dependency injection?", "MCQ",
                     stack.getStackId(), topic.getTopicId(), "Hard",
                     "X", "Y", "Z", "W",
-                    null, null, "B", false))))
+                    null, null, "B", false, false))))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.message").value(containsString("Duplicate")));
 
@@ -318,7 +318,7 @@ void duplicate_rejectedAcrossAllFlows() throws Exception {
                     "What is dependency injection?", "MCQ",
                     stack.getStackId(), topic.getTopicId(), "Medium",
                     "P", "Q", "R", "S",
-                    null, null, "C", false))))
+                    null, null, "C", false, false))))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.message").value(containsString("Duplicate")));
 }

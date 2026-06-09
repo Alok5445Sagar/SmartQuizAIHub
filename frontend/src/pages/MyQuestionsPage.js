@@ -29,6 +29,21 @@ export default function MyQuestionsPage() {
     }
   }, []);
 
+  // Count questions per status from current data
+  const statusCounts = (data?.content || []).reduce((acc, mcq) => {
+    acc[mcq.status] = (acc[mcq.status] || 0) + 1;
+    return acc;
+  }, {});
+
+  const STATUS_TABS = [
+    { label: 'All', value: '' },
+    { label: 'Draft', value: 'DRAFT' },
+    { label: 'Ready for Review', value: 'READY_FOR_REVIEW' },
+    { label: 'Under Review', value: 'UNDER_REVIEW' },
+    { label: 'Approved', value: 'APPROVED' },
+    { label: 'Rejected', value: 'REJECTED' },
+  ];
+
   // Load stacks for filter dropdown
   useEffect(() => {
     referenceAPI.getStacks().then(r => setStacks(r.data));
@@ -97,6 +112,50 @@ export default function MyQuestionsPage() {
           ➕ Add Question
         </button>
       </div>
+
+      {/* Status tabs */}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+            {STATUS_TABS.map(tab => (
+              <button
+                key={tab.value}
+                onClick={() => { setFilterStatus(tab.value); setPage(0); }}
+                style={{
+                  padding: '5px 14px',
+                  borderRadius: 100,
+                  border: `1.5px solid ${filterStatus === tab.value ? 'var(--accent)' : 'var(--border)'}`,
+                  background: filterStatus === tab.value ? 'var(--accent)' : 'var(--bg-card)',
+                  color: filterStatus === tab.value ? '#fff' : 'var(--text-secondary)',
+                  fontWeight: 600,
+                  fontSize: 13,
+                  cursor: 'pointer',
+                  fontFamily: 'var(--font)',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {tab.label}
+                {tab.value && data?.totalElements !== undefined && (
+                  <span style={{
+                    marginLeft: 6, fontSize: 11,
+                    background: filterStatus === tab.value ? 'rgba(255,255,255,0.25)' : 'var(--border)',
+                    color: filterStatus === tab.value ? '#fff' : 'var(--text-muted)',
+                    borderRadius: 100, padding: '1px 6px'
+                  }}>
+                    {statusCounts[tab.value] || 0}
+                  </span>
+                )}
+                {!tab.value && (
+                  <span style={{
+                    marginLeft: 6, fontSize: 11,
+                    background: filterStatus === tab.value ? 'rgba(255,255,255,0.25)' : 'var(--border)',
+                    color: filterStatus === tab.value ? '#fff' : 'var(--text-muted)',
+                    borderRadius: 100, padding: '1px 6px'
+                  }}>
+                    {data?.totalElements || 0}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
 
       {/* Filters */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -195,7 +254,7 @@ export default function MyQuestionsPage() {
                       <td style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
                         {page * 10 + idx + 1}
                       </td>
-                      <td><QuestionTypeBadge type={mcq.questionType} /></td>
+                      <td><QuestionTypeBadge type={mcq.questionType} aiGenerated={mcq.aiGenerated} /></td>
                       <td>
                         <div className="truncate" title={mcq.questionStem}>
                           {mcq.questionStem}

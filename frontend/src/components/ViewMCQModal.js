@@ -1,5 +1,6 @@
 import React from 'react';
-import StatusBadge, { DifficultyBadge } from './StatusBadge';
+import StatusBadge, { DifficultyBadge, QuestionTypeBadge } from './StatusBadge';
+
 
 export default function ViewMCQModal({ mcq, onClose }) {
   return (
@@ -24,13 +25,7 @@ export default function ViewMCQModal({ mcq, onClose }) {
           <div style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
               <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>OPTIONS</p>
-              <span style={{
-                fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 100,
-                background: mcq.questionType === 'MSQ' ? '#dbeafe' : '#ede9ff',
-                color: mcq.questionType === 'MSQ' ? '#1d4ed8' : '#5b21b6',
-              }}>
-                {mcq.questionType === 'MSQ' ? '☑️ MSQ' : '🔘 MCQ'}
-              </span>
+              <QuestionTypeBadge type={mcq.questionType} aiGenerated={mcq.aiGenerated} />
             </div>
               <div className="options-grid">
                 {['A', 'B', 'C', 'D', 'E', 'F'].map(opt => {

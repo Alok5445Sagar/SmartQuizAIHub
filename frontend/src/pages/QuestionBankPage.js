@@ -373,7 +373,7 @@ export default function QuestionBankPage() {
                       <td style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
                         {page * 10 + idx + 1}
                       </td>
-                      <td><QuestionTypeBadge type={mcq.questionType} /></td>
+                      <td><QuestionTypeBadge type={mcq.questionType} aiGenerated={mcq.aiGenerated} /></td>
                       <td style={{ maxWidth: 260 }}>
                         <div style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', fontSize: 13, lineHeight: 1.5 }} title={mcq.questionStem}>
                           {mcq.questionStem}

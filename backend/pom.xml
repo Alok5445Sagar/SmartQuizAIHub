@@ -88,6 +88,12 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- HTTP client for AI API calls -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+        </dependency>
+
     </dependencies>
 
     <build>

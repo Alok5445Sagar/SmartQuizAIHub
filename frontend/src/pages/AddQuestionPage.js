@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { mcqAPI } from '../services/api';
 import MCQForm from '../components/MCQForm';
 import toast from 'react-hot-toast';
+import AIGeneratePage from './AIGeneratePage';
 
 export default function AddQuestionPage() {
   const [mode, setMode] = useState(null); // null = choose, 'single', 'bulk'
@@ -102,7 +103,7 @@ export default function AddQuestionPage() {
             <p className="page-subtitle">Choose how to add questions</p>
           </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, maxWidth: 600 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 20, maxWidth: 860 }}>
           <button onClick={() => setMode('single')} style={modeCardStyle}>
             <span style={{ fontSize: 40, display: 'block', marginBottom: 12 }}>✍️</span>
             <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Add from UI</h3>
@@ -112,6 +113,11 @@ export default function AddQuestionPage() {
             <span style={{ fontSize: 40, display: 'block', marginBottom: 12 }}>📊</span>
             <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Bulk Upload</h3>
             <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Upload multiple questions via Excel file</p>
+          </button>
+          <button onClick={() => setMode('ai')} style={{ ...modeCardStyle, borderColor: 'var(--accent)', background: 'var(--accent-light)' }}>
+            <span style={{ fontSize: 40, display: 'block', marginBottom: 12 }}>🤖</span>
+            <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 6, color: 'var(--accent)' }}>Generate with AI</h3>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Generate questions using AI based on topic</p>
           </button>
         </div>
       </div>
@@ -232,6 +238,15 @@ export default function AddQuestionPage() {
       </div>
     );
   }
+
+
+  if (mode === 'ai') {
+    return <AIGeneratePage onBack={() => setMode(null)} />;
+  }
+
+
+
+
 }
 
 const modeCardStyle = {

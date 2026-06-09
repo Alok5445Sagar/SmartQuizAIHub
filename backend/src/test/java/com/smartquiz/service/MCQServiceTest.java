@@ -1,13 +1,21 @@
 package com.smartquiz.service;
 
-import com.smartquiz.BaseTest;
-import com.smartquiz.dto.MCQDTO;
-import com.smartquiz.entity.*;
-import org.junit.jupiter.api.*;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 
-import static org.assertj.core.api.Assertions.*;
+import com.smartquiz.BaseTest;
+import com.smartquiz.dto.MCQDTO;
+import com.smartquiz.entity.MCQ;
+import com.smartquiz.entity.TechnologyStack;
+import com.smartquiz.entity.Topic;
+import com.smartquiz.entity.User;
+import com.smartquiz.entity.UserStackMapping;
 
 @DisplayName("MCQ Service Tests")
 public class MCQServiceTest extends BaseTest {
@@ -271,12 +279,30 @@ public class MCQServiceTest extends BaseTest {
     // ── DUPLICATE DETECTION ─────────────────────────────────
 
 @Test
-@DisplayName("Create MCQ fails when duplicate stem exists in same stack and topic")
-void createMCQ_duplicateStem_throwsException() {
-    // Create first question
+@DisplayName("Create MCQ does NOT fail when duplicate stem is only in DRAFT status")
+void createMCQ_duplicateStemInDraft_allowed() {
+    // Create first question as DRAFT
     mcqService.createMCQ(sme.getEnterpriseId(), buildCreate(false));
 
-    // Try creating same question again
+    // Creating same stem again as DRAFT should be allowed
+    // because DRAFT questions don't block each other
+    MCQDTO.Response r = mcqService.createMCQ(sme.getEnterpriseId(),
+        new MCQDTO.CreateRequest("Test question?", "MCQ",
+            stack.getStackId(), topic.getTopicId(), "Easy",
+            "Option A", "Option B", "Option C", "Option D",
+            null, null, "B", false, false));
+    assertThat(r).isNotNull();
+}
+
+@Test
+@DisplayName("Create MCQ fails when duplicate stem exists in APPROVED status")
+void createMCQ_duplicateStemApproved_throwsException() {
+    // Create first question and mark as APPROVED
+    MCQ approved = createMCQ(sme, stack, topic, MCQ.Status.APPROVED);
+    approved.setQuestionStem("Test question?");
+    mcqRepository.save(approved);
+
+    // Try creating same question — should fail because APPROVED exists
     assertThatThrownBy(() ->
         mcqService.createMCQ(sme.getEnterpriseId(), buildCreate(false)))
         .isInstanceOf(RuntimeException.class)
@@ -292,7 +318,7 @@ void createMCQ_sameStemDifferentTopic_succeeds() {
     MCQDTO.CreateRequest req2 = new MCQDTO.CreateRequest(
         "Test question?", "MCQ",
         stack.getStackId(), topic2.getTopicId(), "Easy",
-        "Option A", "Option B", "Option C", "Option D", null, null, "B", false);
+        "Option A", "Option B", "Option C", "Option D", null, null, "B", false, false);
 
     mcqService.createMCQ(sme.getEnterpriseId(), req1);
     // Should not throw — different topic
@@ -309,7 +335,7 @@ void updateMCQ_duplicateStem_throwsException() {
     MCQDTO.CreateRequest req2 = new MCQDTO.CreateRequest(
         "Another question?", "MCQ",
         stack.getStackId(), topic.getTopicId(), "Easy",
-        "Option A", "Option B", "Option C", "Option D", null, null, "A", false);
+        "Option A", "Option B", "Option C", "Option D", null, null, "A", false, false);
     MCQ q2 = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
     q2.setQuestionStem("Another question?");
     mcqRepository.save(q2);
@@ -345,15 +371,18 @@ void updateMCQ_sameStemAsSelf_succeeds() {
 }
 
 @Test
-@DisplayName("Whitespace normalization — treats extra spaces as same question")
+@DisplayName("Whitespace normalization — treats extra spaces as same question when APPROVED")
 void createMCQ_extraWhitespaceStem_treatedAsDuplicate() {
-    mcqService.createMCQ(sme.getEnterpriseId(), buildCreate(false));
+    // Create as APPROVED so it blocks duplicates
+    MCQ approved = createMCQ(sme, stack, topic, MCQ.Status.APPROVED);
+    approved.setQuestionStem("Test question?");
+    mcqRepository.save(approved);
 
-    // Same question with extra internal spaces
+    // Same question with extra internal spaces — should be blocked
     MCQDTO.CreateRequest reqWithSpaces = new MCQDTO.CreateRequest(
         "Test  question?", "MCQ",  // double space
         stack.getStackId(), topic.getTopicId(), "Easy",
-        "Option A", "Option B", "Option C", "Option D", null, null, "B", false);
+        "Option A", "Option B", "Option C", "Option D", null, null, "B", false, false);
 
     assertThatThrownBy(() ->
         mcqService.createMCQ(sme.getEnterpriseId(), reqWithSpaces))
@@ -370,7 +399,7 @@ void createMSQ_savesCorrectly() {
         "Which are OOP principles?", "MSQ",
         stack.getStackId(), topic.getTopicId(), "Medium",
         "Inheritance", "Compilation", "Encapsulation", "Linking",
-        "Polymorphism", null, "A,C,E", false);
+        "Polymorphism", null, "A,C,E", false, false);
 
     MCQDTO.Response r = mcqService.createMCQ(sme.getEnterpriseId(), req);
 
@@ -386,7 +415,7 @@ void createMSQ_sendForReview() {
         "Which are Java collection types?", "MSQ",
         stack.getStackId(), topic.getTopicId(), "Easy",
         "ArrayList", "HashMap", "Compilation", "LinkedList",
-        null, null, "A,B,D", true);
+        null, null, "A,B,D", true, false);
 
     MCQDTO.Response r = mcqService.createMCQ(sme.getEnterpriseId(), req);
 
@@ -401,7 +430,7 @@ void createMSQ_withSixOptions_savesBothEAndF() {
         "Which are valid Java keywords?", "MSQ",
         stack.getStackId(), topic.getTopicId(), "Hard",
         "class", "struct", "interface", "pointer",
-        "extends", "implements", "A,C,E,F", false);
+        "extends", "implements", "A,C,E,F", false, false);
 
     MCQDTO.Response r = mcqService.createMCQ(sme.getEnterpriseId(), req);
 
@@ -411,15 +440,19 @@ void createMSQ_withSixOptions_savesBothEAndF() {
 }
 
 @Test
-@DisplayName("MSQ duplicate detection works same as MCQ")
+@DisplayName("MSQ duplicate detection works when existing question is APPROVED")
 void createMSQ_duplicate_throwsException() {
-    MCQDTO.CreateRequest req = new MCQDTO.CreateRequest(
+    // Create as APPROVED first
+    MCQ approved = createMCQ(sme, stack, topic, MCQ.Status.APPROVED);
+    approved.setQuestionStem("Which are OOP principles?");
+    approved.setQuestionType(MCQ.QuestionType.MSQ);
+    mcqRepository.save(approved);
+
+    final MCQDTO.CreateRequest req = new MCQDTO.CreateRequest(
         "Which are OOP principles?", "MSQ",
         stack.getStackId(), topic.getTopicId(), "Medium",
         "Inheritance", "Compilation", "Encapsulation", "Linking",
-        "Polymorphism", null, "A,C,E", false);
-
-    mcqService.createMCQ(sme.getEnterpriseId(), req);
+        "Polymorphism", null, "A,C,E", false, false);
 
     assertThatThrownBy(() ->
         mcqService.createMCQ(sme.getEnterpriseId(), req))
@@ -438,7 +471,7 @@ void mcqAndMsq_sameStem_treatedAsDuplicate() {
         "Test question?", "MSQ",
         stack.getStackId(), topic.getTopicId(), "Easy",
         "Option A", "Option B", "Option C", "Option D",
-        "Option E", null, "A,C", false);
+        "Option E", null, "A,C", false, false);
 
     assertThatThrownBy(() ->
         mcqService.createMCQ(sme.getEnterpriseId(), msqReq))
@@ -467,10 +500,10 @@ void updateMCQ_changeTypeToMSQ_succeeds() {
     // ── HELPERS ───────────────────────────────────────────
 
     private MCQDTO.CreateRequest buildCreate(boolean send) {
-    return new MCQDTO.CreateRequest("Test question?", "MCQ", stack.getStackId(),
-            topic.getTopicId(), "Easy",
-            "Option A", "Option B", "Option C", "Option D", null, null, "B", send);
-}
+        return new MCQDTO.CreateRequest("Test question?", "MCQ", stack.getStackId(),
+                topic.getTopicId(), "Easy",
+                "Option A", "Option B", "Option C", "Option D", null, null, "B", send, false);
+    }
 
 private MCQDTO.UpdateRequest buildUpdate(String stem, boolean send) {
     return new MCQDTO.UpdateRequest(stem, "MCQ", stack.getStackId(),

@@ -6,6 +6,7 @@ import org.junit.jupiter.api.*;
 import org.springframework.data.domain.*;
 
 import java.util.List;
+import java.util.Collection;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -164,45 +165,86 @@ public class MCQRepositoryTest extends BaseTest {
     // ── DUPLICATE DETECTION ─────────────────────────────────
 
 @Test
-@DisplayName("existsByQuestionStemAndStackAndTopic returns true for existing stem")
-void existsByQuestionStemAndStackAndTopic_returnsTrue() {
-    MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
-    mcq.setQuestionStem("Unique test question?");
-    mcqRepository.save(mcq);
+    @DisplayName("existsByQuestionStemAndStackAndTopicNonDraft returns true for APPROVED question")
+    void existsByQuestionStemNonDraft_returnsTrueForApproved() {
+        MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.APPROVED);
+        mcq.setQuestionStem("Unique approved question?");
+        mcqRepository.save(mcq);
 
-    boolean exists = mcqRepository.existsByQuestionStemAndStackAndTopic(
-            "Unique test question?", stack.getStackId(), topic.getTopicId());
+        boolean exists = mcqRepository.existsByQuestionStemAndStackAndTopicNonDraft(
+                "Unique approved question?", stack.getStackId(), topic.getTopicId());
 
-    assertThat(exists).isTrue();
-}
+        assertThat(exists).isTrue();
+    }
 
-@Test
-@DisplayName("existsByQuestionStemAndStackAndTopic returns false for different topic")
-void existsByQuestionStemAndStackAndTopic_differentTopic_returnsFalse() {
-    MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
-    mcq.setQuestionStem("Unique test question?");
-    mcqRepository.save(mcq);
+    @Test
+    @DisplayName("existsByQuestionStemAndStackAndTopicNonDraft returns false for DRAFT question")
+    void existsByQuestionStemNonDraft_returnsFalseForDraft() {
+        MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+        mcq.setQuestionStem("Unique draft question?");
+        mcqRepository.save(mcq);
 
-    Topic differentTopic = createTopic("Different Topic", stack);
+        // DRAFT should NOT be flagged as duplicate
+        boolean exists = mcqRepository.existsByQuestionStemAndStackAndTopicNonDraft(
+                "Unique draft question?", stack.getStackId(), topic.getTopicId());
 
-    boolean exists = mcqRepository.existsByQuestionStemAndStackAndTopic(
-            "Unique test question?", stack.getStackId(), differentTopic.getTopicId());
+        assertThat(exists).isFalse();
+    }
 
-    assertThat(exists).isFalse();
-}
+    @Test
+    @DisplayName("existsByQuestionStemAndStackAndTopicNonDraft returns false for different topic")
+    void existsByQuestionStemNonDraft_differentTopic_returnsFalse() {
+        MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.APPROVED);
+        mcq.setQuestionStem("Unique approved question?");
+        mcqRepository.save(mcq);
 
-@Test
-@DisplayName("existsByQuestionStemAndStackAndTopic is case insensitive")
-void existsByQuestionStemAndStackAndTopic_caseInsensitive() {
-    MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
-    mcq.setQuestionStem("What is Java?");
-    mcqRepository.save(mcq);
+        Topic differentTopic = createTopic("Different Topic For Test", stack);
 
-    boolean exists = mcqRepository.existsByQuestionStemAndStackAndTopic(
-            "WHAT IS JAVA?", stack.getStackId(), topic.getTopicId());
+        boolean exists = mcqRepository.existsByQuestionStemAndStackAndTopicNonDraft(
+                "Unique approved question?", stack.getStackId(), differentTopic.getTopicId());
 
-    assertThat(exists).isTrue();
-}
+        assertThat(exists).isFalse();
+    }
+
+    @Test
+    @DisplayName("existsByQuestionStemAndStackAndTopicNonDraft is case insensitive")
+    void existsByQuestionStemNonDraft_caseInsensitive() {
+        MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.READY_FOR_REVIEW);
+        mcq.setQuestionStem("What is Java?");
+        mcqRepository.save(mcq);
+
+        boolean exists = mcqRepository.existsByQuestionStemAndStackAndTopicNonDraft(
+                "WHAT IS JAVA?", stack.getStackId(), topic.getTopicId());
+
+        assertThat(exists).isTrue();
+    }
+
+    @Test
+    @DisplayName("findNonDraftByStackAndTopic excludes DRAFT questions")
+    void findNonDraftByStackAndTopic_excludesDrafts() {
+        MCQ draft = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+        MCQ approved = createMCQ(sme, stack, topic, MCQ.Status.APPROVED);
+        MCQ underReview = createMCQ(sme, stack, topic, MCQ.Status.UNDER_REVIEW);
+
+        List<MCQ> result = mcqRepository.findNonDraftByStackAndTopic(
+                stack.getStackId(), topic.getTopicId(), null, List.of(MCQ.Status.APPROVED, MCQ.Status.READY_FOR_REVIEW));
+
+        assertThat(result).hasSize(2);
+        assertThat(result.stream().noneMatch(m -> m.getStatus() == MCQ.Status.DRAFT)).isTrue();
+    }
+
+    @Test
+    @DisplayName("findNonDraftByStackAndTopic excludes specified question ID")
+    void findNonDraftByStackAndTopic_excludesSpecifiedId() {
+        MCQ approved1 = createMCQ(sme, stack, topic, MCQ.Status.APPROVED);
+        MCQ approved2 = createMCQ(sme, stack, topic, MCQ.Status.APPROVED);
+
+        List<MCQ> result = mcqRepository.findNonDraftByStackAndTopic(
+                stack.getStackId(), topic.getTopicId(), approved1.getQuestionId(),  List.of(MCQ.Status.APPROVED, MCQ.Status.READY_FOR_REVIEW));
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getQuestionId()).isEqualTo(approved2.getQuestionId());
+    }
 
 @Test
 @DisplayName("existsByQuestionStemAndStackAndTopicExcluding excludes self")

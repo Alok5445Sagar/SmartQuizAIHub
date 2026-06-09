@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 @TestPropertySource(locations = "classpath:application-test.properties")
 @Transactional
 @org.springframework.test.annotation.DirtiesContext(classMode = org.springframework.test.annotation.DirtiesContext.ClassMode.BEFORE_CLASS)
+@org.springframework.context.annotation.Import(com.smartquiz.config.TestConfig.class)
 
 public abstract class BaseTest {
 

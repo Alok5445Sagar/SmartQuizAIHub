@@ -179,7 +179,7 @@ export default function MyPendingReviewsPage() {
                       <td style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
                         {page * 10 + idx + 1}
                       </td>
-                      <td><QuestionTypeBadge type={mcq.questionType} /></td>
+                      <td><QuestionTypeBadge type={mcq.questionType} aiGenerated={mcq.aiGenerated} /></td>
                       <td>
                         <div className="truncate" style={{ maxWidth: 260 }} title={mcq.questionStem}>
                           {mcq.questionStem}

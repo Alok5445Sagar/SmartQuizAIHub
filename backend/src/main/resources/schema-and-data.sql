@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS mcqs (
     option_e               VARCHAR(500) NULL,
     option_f               VARCHAR(500) NULL,
     correct_answer         VARCHAR(20) NOT NULL COMMENT 'MCQ: single letter e.g. A | MSQ: comma-separated e.g. A,C,E',
+    is_ai_generated        TINYINT(1) NOT NULL DEFAULT 0,
     difficulty             ENUM('Easy','Medium','Hard') NOT NULL,
     stack_id               BIGINT NOT NULL,
     topic_id               BIGINT NOT NULL,

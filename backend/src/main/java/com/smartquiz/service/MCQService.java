@@ -34,7 +34,9 @@ public class MCQService {
 
         // Duplicate check
         String normalizedStem = req.getQuestionStem().trim().replaceAll("\\s+", " ");
-        if (mcqRepository.existsByQuestionStemAndStackAndTopic(
+        // Duplicate check — only against non-DRAFT questions
+        // DRAFT questions don't block new creates (AI batch generation would fail otherwise)
+        if (mcqRepository.existsByQuestionStemAndStackAndTopicNonDraft(
                 normalizedStem, req.getStackId(), req.getTopicId())) {
             throw new RuntimeException(
                 "Duplicate question: A question with the same stem already exists in this stack and topic.");
@@ -56,7 +58,8 @@ public class MCQService {
         mcq.setCorrectAnswer(req.getCorrectAnswer());
         mcq.setCreator(creator);
         mcq.setStatus(req.isSendForReview() ? MCQ.Status.READY_FOR_REVIEW : MCQ.Status.DRAFT);
-
+        mcq.setAiGenerated(req.isAiGenerated());
+        
         return MCQDTO.Response.fromEntity(mcqRepository.save(mcq));
     }
 
@@ -87,7 +90,10 @@ public class MCQService {
 
         // Duplicate check — exclude the current question being edited
         String normalizedStem = req.getQuestionStem().trim().replaceAll("\\s+", " ");
-        if (mcqRepository.existsByQuestionStemAndStackAndTopicExcluding(
+        // Duplicate check — exclude self, only check non-DRAFT questions
+        if (mcqRepository.existsByQuestionStemAndStackAndTopicNonDraft(
+                normalizedStem, req.getStackId(), req.getTopicId())
+            && mcqRepository.existsByQuestionStemAndStackAndTopicExcluding(
                 normalizedStem, req.getStackId(), req.getTopicId(), questionId)) {
             throw new RuntimeException(
                 "Duplicate question: A question with the same stem already exists in this stack and topic.");
@@ -354,8 +360,8 @@ public class MCQService {
             }
             seenInFile.add(fileKey);
 
-            // Database duplicate check
-            if (mcqRepository.existsByQuestionStemAndStackAndTopic(
+            // Database duplicate check — only against non-DRAFT questions
+            if (mcqRepository.existsByQuestionStemAndStackAndTopicNonDraft(
                     stem, stackOpt.get().getStackId(), topicOpt.get().getTopicId())) {
                 errors.add("Row " + rowNum + ": Duplicate question — '" +
                     stem.substring(0, Math.min(stem.length(), 60)) + "...' already exists in this stack and topic.");

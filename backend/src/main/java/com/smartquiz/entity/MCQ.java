@@ -46,6 +46,10 @@ public class MCQ {
     @Column(name = "option_f")
     private String optionF;
 
+    
+    @Column(name = "is_ai_generated", nullable = false)
+    private boolean aiGenerated = false;
+
     // For MCQ: single letter e.g. "A"
     // For MSQ: comma-separated e.g. "A,C" or "B,D,E"
     @Column(name = "correct_answer", nullable = false)

@@ -56,4 +56,9 @@ export const referenceAPI = {
   getUsers: () => api.get('/api/reference/users'),
 };
 
+export const aiAPI = {
+  generateQuestions: (data) => api.post('/api/ai/generate', data),
+  checkSimilarity: (data) => api.post('/api/ai/similarity-check', data),
+};
+
 export default api;

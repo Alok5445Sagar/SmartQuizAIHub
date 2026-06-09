@@ -1,14 +1,17 @@
 package com.smartquiz.repository;
 
-import com.smartquiz.entity.MCQ;
-import com.smartquiz.entity.MCQ.Status;
+import java.util.List;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
-import java.util.List;
+
+import com.smartquiz.entity.MCQ;
+import com.smartquiz.entity.MCQ.Status;
+import java.util.Collection;
 
 @Repository
 public interface MCQRepository extends JpaRepository<MCQ, Long> {
@@ -82,4 +85,29 @@ public interface MCQRepository extends JpaRepository<MCQ, Long> {
         @Param("topicId") Long topicId,
         @Param("excludeId") Long excludeId
     );
+
+    @Query("""
+    SELECT COUNT(m) > 0 FROM MCQ m
+    WHERE LOWER(TRIM(m.questionStem)) = LOWER(TRIM(:questionStem))
+    AND m.stack.stackId = :stackId
+    AND m.topic.topicId = :topicId
+    AND m.status != com.smartquiz.entity.MCQ$Status.DRAFT
+    """)
+    boolean existsByQuestionStemAndStackAndTopicNonDraft(
+        @Param("questionStem") String questionStem,
+        @Param("stackId") Long stackId,
+        @Param("topicId") Long topicId
+    );
+
+    @Query("""
+        SELECT m FROM MCQ m
+        WHERE m.stack.stackId = :stackId
+        AND m.topic.topicId = :topicId
+        AND (:excludeId IS NULL OR m.questionId != :excludeId)
+        AND m.status IN :statuses
+    """)
+    List<MCQ> findNonDraftByStackAndTopic(@Param("stackId") Long stackId,
+                                           @Param("topicId") Long topicId,
+                                           @Param("excludeId") Long excludeId,
+                                           @Param("statuses") Collection<MCQ.Status> statuses);
 }

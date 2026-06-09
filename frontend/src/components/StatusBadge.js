@@ -32,14 +32,21 @@ export function DifficultyBadge({ difficulty }) {
 }
 
 
-export function QuestionTypeBadge({ type }) {
+export function QuestionTypeBadge({ type, aiGenerated }) {
   const isMSQ = type === 'MSQ';
   return (
-    <span className="badge" style={{
-      background: isMSQ ? '#dbeafe' : '#ede9ff',
-      color: isMSQ ? '#1d4ed8' : '#5b21b6',
-    }}>
-      {isMSQ ? '☑️ MSQ' : '🔘 MCQ'}
-    </span>
+    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+      <span className="badge" style={{
+        background: isMSQ ? '#dbeafe' : '#ede9ff',
+        color: isMSQ ? '#1d4ed8' : '#5b21b6',
+      }}>
+        {isMSQ ? '☑️ MSQ' : '🔘 MCQ'}
+      </span>
+      {aiGenerated && (
+        <span className="badge" style={{ background: '#d1fae5', color: '#065f46' }}>
+          🤖 AI
+        </span>
+      )}
+    </div>
   );
 }

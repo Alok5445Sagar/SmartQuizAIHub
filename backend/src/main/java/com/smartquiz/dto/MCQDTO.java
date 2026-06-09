@@ -25,6 +25,7 @@ public class MCQDTO {
         private String optionF;
         private String correctAnswer; // "A" for MCQ, "A,C" for MSQ
         private boolean sendForReview;
+        private boolean aiGenerated = false;
     }
 
     @Data
@@ -72,6 +73,7 @@ public class MCQDTO {
         private String questionType;
         private String optionE;
         private String optionF;
+        private boolean aiGenerated;
 
         public static Response fromEntity(MCQ mcq) {
             Response r = new Response();
@@ -96,6 +98,7 @@ public class MCQDTO {
             r.setReviewerComments(mcq.getReviewerComments());
             r.setCreatedAt(mcq.getCreatedAt());
             r.setUpdatedAt(mcq.getUpdatedAt());
+            r.setAiGenerated(mcq.isAiGenerated());
             return r;
         }
     }
