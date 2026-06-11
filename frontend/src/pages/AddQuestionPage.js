@@ -36,8 +36,8 @@ export default function AddQuestionPage() {
   const handleSaveAndSend = async (data) => {
     setLoading('send');
     try {
-      await mcqAPI.create(data);
-      toast.success('Question submitted for review!');
+      await mcqAPI.create({ ...data, sendForReview: false });
+      toast.success('Question saved as Draft. Please use Edit page Duplicate Check, then Save & Send for Review.');
       navigate('/my-questions');
     } catch (err) {
       const msg = err.response?.data?.message || 'Failed to submit question';

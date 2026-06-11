@@ -224,7 +224,7 @@ public class MCQRepositoryTest extends BaseTest {
     void findNonDraftByStackAndTopic_excludesDrafts() {
         MCQ draft = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
         MCQ approved = createMCQ(sme, stack, topic, MCQ.Status.APPROVED);
-        MCQ underReview = createMCQ(sme, stack, topic, MCQ.Status.UNDER_REVIEW);
+        MCQ readyForReview = createMCQ(sme, stack, topic, MCQ.Status.READY_FOR_REVIEW);
 
         List<MCQ> result = mcqRepository.findNonDraftByStackAndTopic(
                 stack.getStackId(), topic.getTopicId(), null, List.of(MCQ.Status.APPROVED, MCQ.Status.READY_FOR_REVIEW));

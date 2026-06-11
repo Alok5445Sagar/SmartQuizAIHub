@@ -210,8 +210,8 @@ public class MCQLifecycleIntegrationTest extends BaseTest {
     }
 
     @Test
-        @DisplayName("Duplicate question is rejected end-to-end")
-        void duplicateQuestion_isRejected() throws Exception {
+        @DisplayName("Manual duplicate create is allowed; duplicate check happens on edit/review flow")
+        void duplicateQuestion_manualCreateAllowed() throws Exception {
         // Create first question
         mockMvc.perform(post("/api/mcq")
                 .header("Authorization", "Bearer " + smeToken)
@@ -222,7 +222,7 @@ public class MCQLifecycleIntegrationTest extends BaseTest {
                         "Protocol", "Style", "Framework", "Database", null, null, "B", false, false))))
                 .andExpect(status().isOk());
 
-        // Try creating same question again
+        // Try creating same question again manually
         mockMvc.perform(post("/api/mcq")
                 .header("Authorization", "Bearer " + smeToken)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -230,8 +230,7 @@ public class MCQLifecycleIntegrationTest extends BaseTest {
                         "What is REST?", "MCQ",
                         stack.getStackId(), topic.getTopicId(), "Hard",
                         "A", "B", "C", "D", null, null, "A", false, false))))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value(containsString("Duplicate")));
+                .andExpect(status().isOk());
         }
 
 
@@ -285,8 +284,8 @@ void msqLifecycle_draftToApproved() throws Exception {
 }
 
 @Test
-@DisplayName("Duplicate MCQ rejected across both SME and Admin flows")
-void duplicate_rejectedAcrossAllFlows() throws Exception {
+@DisplayName("Manual duplicate MCQ create is allowed across users")
+void duplicate_manualAllowedAcrossUsers() throws Exception {
     // SME creates question
     mockMvc.perform(post("/api/mcq")
             .header("Authorization", "Bearer " + smeToken)
@@ -307,8 +306,7 @@ void duplicate_rejectedAcrossAllFlows() throws Exception {
                     stack.getStackId(), topic.getTopicId(), "Hard",
                     "X", "Y", "Z", "W",
                     null, null, "B", false, false))))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.message").value(containsString("Duplicate")));
+            .andExpect(status().isOk());
 
     // Different SME tries same question
     mockMvc.perform(post("/api/mcq")
@@ -319,8 +317,7 @@ void duplicate_rejectedAcrossAllFlows() throws Exception {
                     stack.getStackId(), topic.getTopicId(), "Medium",
                     "P", "Q", "R", "S",
                     null, null, "C", false, false))))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.message").value(containsString("Duplicate")));
+            .andExpect(status().isOk());
 }
 
 

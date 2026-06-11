@@ -295,18 +295,15 @@ void createMCQ_duplicateStemInDraft_allowed() {
 }
 
 @Test
-@DisplayName("Create MCQ fails when duplicate stem exists in APPROVED status")
-void createMCQ_duplicateStemApproved_throwsException() {
+@DisplayName("Create MCQ allows manual duplicate stem even when APPROVED exists")
+void createMCQ_duplicateStemApproved_manualAllowed() {
     // Create first question and mark as APPROVED
     MCQ approved = createMCQ(sme, stack, topic, MCQ.Status.APPROVED);
     approved.setQuestionStem("Test question?");
     mcqRepository.save(approved);
 
-    // Try creating same question — should fail because APPROVED exists
-    assertThatThrownBy(() ->
-        mcqService.createMCQ(sme.getEnterpriseId(), buildCreate(false)))
-        .isInstanceOf(RuntimeException.class)
-        .hasMessageContaining("Duplicate question");
+    MCQDTO.Response r = mcqService.createMCQ(sme.getEnterpriseId(), buildCreate(false));
+    assertThat(r).isNotNull();
 }
 
 @Test
@@ -327,8 +324,8 @@ void createMCQ_sameStemDifferentTopic_succeeds() {
 }
 
 @Test
-@DisplayName("Update MCQ fails when stem matches another existing question")
-void updateMCQ_duplicateStem_throwsException() {
+@DisplayName("Update MCQ allows manual duplicate stem for DRAFT flow")
+void updateMCQ_duplicateStem_manualDraftAllowed() {
     // Create two questions
     MCQDTO.Response q1 = mcqService.createMCQ(sme.getEnterpriseId(), buildCreate(false));
 
@@ -346,10 +343,8 @@ void updateMCQ_duplicateStem_throwsException() {
         stack.getStackId(), topic.getTopicId(), "Medium",
         "Option A", "Option B", "Option C", "Option D", null, null, "A", false);
 
-    assertThatThrownBy(() ->
-        mcqService.updateMCQ(sme.getEnterpriseId(), q2.getQuestionId(), updateReq, false))
-        .isInstanceOf(RuntimeException.class)
-        .hasMessageContaining("Duplicate question");
+    MCQDTO.Response r = mcqService.updateMCQ(sme.getEnterpriseId(), q2.getQuestionId(), updateReq, false);
+    assertThat(r).isNotNull();
 }
 
 @Test
@@ -371,8 +366,8 @@ void updateMCQ_sameStemAsSelf_succeeds() {
 }
 
 @Test
-@DisplayName("Whitespace normalization — treats extra spaces as same question when APPROVED")
-void createMCQ_extraWhitespaceStem_treatedAsDuplicate() {
+@DisplayName("Whitespace variation in manual create is allowed")
+void createMCQ_extraWhitespaceStem_manualAllowed() {
     // Create as APPROVED so it blocks duplicates
     MCQ approved = createMCQ(sme, stack, topic, MCQ.Status.APPROVED);
     approved.setQuestionStem("Test question?");
@@ -384,10 +379,8 @@ void createMCQ_extraWhitespaceStem_treatedAsDuplicate() {
         stack.getStackId(), topic.getTopicId(), "Easy",
         "Option A", "Option B", "Option C", "Option D", null, null, "B", false, false);
 
-    assertThatThrownBy(() ->
-        mcqService.createMCQ(sme.getEnterpriseId(), reqWithSpaces))
-        .isInstanceOf(RuntimeException.class)
-        .hasMessageContaining("Duplicate question");
+    MCQDTO.Response r = mcqService.createMCQ(sme.getEnterpriseId(), reqWithSpaces);
+    assertThat(r).isNotNull();
 }
 
 // ── MSQ TESTS ────────────────────────────────────────────
@@ -440,8 +433,8 @@ void createMSQ_withSixOptions_savesBothEAndF() {
 }
 
 @Test
-@DisplayName("MSQ duplicate detection works when existing question is APPROVED")
-void createMSQ_duplicate_throwsException() {
+@DisplayName("Manual MSQ duplicate create is allowed")
+void createMSQ_duplicate_manualAllowed() {
     // Create as APPROVED first
     MCQ approved = createMCQ(sme, stack, topic, MCQ.Status.APPROVED);
     approved.setQuestionStem("Which are OOP principles?");
@@ -454,15 +447,13 @@ void createMSQ_duplicate_throwsException() {
         "Inheritance", "Compilation", "Encapsulation", "Linking",
         "Polymorphism", null, "A,C,E", false, false);
 
-    assertThatThrownBy(() ->
-        mcqService.createMCQ(sme.getEnterpriseId(), req))
-        .isInstanceOf(RuntimeException.class)
-        .hasMessageContaining("Duplicate question");
+    MCQDTO.Response r = mcqService.createMCQ(sme.getEnterpriseId(), req);
+    assertThat(r).isNotNull();
 }
 
 @Test
-@DisplayName("MCQ and MSQ with same stem in same topic are treated as duplicates")
-void mcqAndMsq_sameStem_treatedAsDuplicate() {
+@DisplayName("Manual MCQ and MSQ with same stem are both allowed at create stage")
+void mcqAndMsq_sameStem_manualCreateAllowed() {
     // Create as MCQ
     mcqService.createMCQ(sme.getEnterpriseId(), buildCreate(false));
 
@@ -473,10 +464,25 @@ void mcqAndMsq_sameStem_treatedAsDuplicate() {
         "Option A", "Option B", "Option C", "Option D",
         "Option E", null, "A,C", false, false);
 
-    assertThatThrownBy(() ->
-        mcqService.createMCQ(sme.getEnterpriseId(), msqReq))
-        .isInstanceOf(RuntimeException.class)
-        .hasMessageContaining("Duplicate question");
+    MCQDTO.Response r = mcqService.createMCQ(sme.getEnterpriseId(), msqReq);
+    assertThat(r).isNotNull();
+}
+
+@Test
+@DisplayName("AI-generated MCQ create fails when duplicate stem exists in APPROVED status")
+void createMCQ_aiGeneratedDuplicateStemApproved_throwsException() {
+    MCQ approved = createMCQ(sme, stack, topic, MCQ.Status.APPROVED);
+    approved.setQuestionStem("Test question?");
+    mcqRepository.save(approved);
+
+    MCQDTO.CreateRequest aiReq = new MCQDTO.CreateRequest(
+            "Test question?", "MCQ",
+            stack.getStackId(), topic.getTopicId(), "Easy",
+            "Option A", "Option B", "Option C", "Option D", null, null, "B", false, true);
+
+    assertThatThrownBy(() -> mcqService.createMCQ(sme.getEnterpriseId(), aiReq))
+            .isInstanceOf(RuntimeException.class)
+            .hasMessageContaining("Duplicate question");
 }
 
 @Test

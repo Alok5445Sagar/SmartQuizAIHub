@@ -334,8 +334,8 @@ public class MCQControllerTest extends BaseTest {
     // ── DUPLICATE DETECTION ─────────────────────────────────
 
 @Test
-@DisplayName("POST /api/mcq rejects duplicate question stem in same stack and topic")
-void createMCQ_duplicate_returns400() throws Exception {
+@DisplayName("POST /api/mcq allows manual duplicate stem; duplicate check happens on edit/review flow")
+void createMCQ_duplicate_manualAllowed() throws Exception {
     // Create first
     mockMvc.perform(post("/api/mcq")
             .header("Authorization", "Bearer " + smeToken)
@@ -343,19 +343,17 @@ void createMCQ_duplicate_returns400() throws Exception {
             .content(objectMapper.writeValueAsString(buildCreate(false))))
             .andExpect(status().isOk());
 
-    // Try creating duplicate
+        // Try creating duplicate manually (allowed; duplicate check is on edit/review flow)
     mockMvc.perform(post("/api/mcq")
             .header("Authorization", "Bearer " + smeToken)
             .contentType(MediaType.APPLICATION_JSON)
             .content(objectMapper.writeValueAsString(buildCreate(false))))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.message").value(
-                containsString("Duplicate question")));
+                        .andExpect(status().isOk());
 }
 
 @Test
-@DisplayName("PUT /api/mcq/{id} rejects duplicate stem matching another question")
-void updateMCQ_duplicateStem_returns400() throws Exception {
+@DisplayName("PUT /api/mcq/{id} allows manual duplicate stem in DRAFT; review gate handles similarity")
+void updateMCQ_duplicateStem_manualDraftAllowed() throws Exception {
     // Create two questions
     mockMvc.perform(post("/api/mcq")
             .header("Authorization", "Bearer " + smeToken)
@@ -367,7 +365,7 @@ void updateMCQ_duplicateStem_returns400() throws Exception {
     q2.setQuestionStem("A different question?");
     mcqRepository.save(q2);
 
-    // Try updating q2 to have same stem as q1
+        // Try updating q2 to have same stem as q1 (both manual DRAFT)
     MCQDTO.UpdateRequest updateReq = new MCQDTO.UpdateRequest(
         "Test question?", "MCQ",
         stack.getStackId(), topic.getTopicId(), "Easy",
@@ -377,9 +375,28 @@ void updateMCQ_duplicateStem_returns400() throws Exception {
             .header("Authorization", "Bearer " + smeToken)
             .contentType(MediaType.APPLICATION_JSON)
             .content(objectMapper.writeValueAsString(updateReq)))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.message").value(
-                containsString("Duplicate question")));
+                        .andExpect(status().isOk());
+}
+
+@Test
+@DisplayName("POST /api/mcq rejects duplicate when AI-generated flag is true")
+void createMCQ_duplicate_aiGeneratedRejected() throws Exception {
+        MCQ approved = createMCQ(sme, stack, topic, MCQ.Status.APPROVED);
+        approved.setQuestionStem("Test question?");
+        mcqRepository.save(approved);
+
+        MCQDTO.CreateRequest aiReq = new MCQDTO.CreateRequest(
+                        "Test question?", "MCQ",
+                        stack.getStackId(), topic.getTopicId(), "Easy",
+                        "Option A", "Option B", "Option C", "Option D",
+                        null, null, "A", false, true);
+
+        mockMvc.perform(post("/api/mcq")
+                        .header("Authorization", "Bearer " + smeToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(aiReq)))
+                        .andExpect(status().isBadRequest())
+                        .andExpect(jsonPath("$.message").value(containsString("Duplicate question")));
 }
 
 // ── MSQ CONTROLLER TESTS ─────────────────────────────────

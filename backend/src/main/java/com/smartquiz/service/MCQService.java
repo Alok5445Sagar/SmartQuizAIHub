@@ -32,12 +32,12 @@ public class MCQService {
         TechnologyStack stack = stackRepository.findById(req.getStackId()).orElseThrow();
         Topic topic = topicRepository.findById(req.getTopicId()).orElseThrow();
 
-        // Duplicate check
         String normalizedStem = req.getQuestionStem().trim().replaceAll("\\s+", " ");
-        // Duplicate check — only against non-DRAFT questions
-        // DRAFT questions don't block new creates (AI batch generation would fail otherwise)
-        if (mcqRepository.existsByQuestionStemAndStackAndTopicNonDraft(
-                normalizedStem, req.getStackId(), req.getTopicId())) {
+        // Duplicate check policy:
+        // - AI-generated MCQs are validated during generation/create flow.
+        // - Manually added MCQs (Add UI) are validated on Edit page/update flow.
+        if (req.isAiGenerated() && mcqRepository.existsByQuestionStemAndStackAndTopicNonDraft(
+            normalizedStem, req.getStackId(), req.getTopicId())) {
             throw new RuntimeException(
                 "Duplicate question: A question with the same stem already exists in this stack and topic.");
         }
@@ -88,10 +88,11 @@ public class MCQService {
         TechnologyStack stack = stackRepository.findById(req.getStackId()).orElseThrow();
         Topic topic = topicRepository.findById(req.getTopicId()).orElseThrow();
 
-        // Duplicate check — exclude the current question being edited
         String normalizedStem = req.getQuestionStem().trim().replaceAll("\\s+", " ");
-        // Duplicate check — exclude self, only check non-DRAFT questions
-        if (mcqRepository.existsByQuestionStemAndStackAndTopicNonDraft(
+        // Duplicate check policy for updates:
+        // Manual MCQs are checked on Edit page/update flow.
+        if (!mcq.isAiGenerated()
+            && mcqRepository.existsByQuestionStemAndStackAndTopicNonDraft(
                 normalizedStem, req.getStackId(), req.getTopicId())
             && mcqRepository.existsByQuestionStemAndStackAndTopicExcluding(
                 normalizedStem, req.getStackId(), req.getTopicId(), questionId)) {
@@ -360,13 +361,7 @@ public class MCQService {
             }
             seenInFile.add(fileKey);
 
-            // Database duplicate check — only against non-DRAFT questions
-            if (mcqRepository.existsByQuestionStemAndStackAndTopicNonDraft(
-                    stem, stackOpt.get().getStackId(), topicOpt.get().getTopicId())) {
-                errors.add("Row " + rowNum + ": Duplicate question — '" +
-                    stem.substring(0, Math.min(stem.length(), 60)) + "...' already exists in this stack and topic.");
-                continue;
-            }
+            // Manual bulk-uploaded questions are duplicate-checked on Edit page before review submission.
 
             MCQ mcq = new MCQ();
             mcq.setQuestionStem(stem);
