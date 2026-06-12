@@ -123,6 +123,25 @@ public class MCQService {
         return MCQDTO.Response.fromEntity(mcqRepository.save(mcq));
     }
 
+    public void deleteMCQ(String requesterId, Long questionId, boolean isAdmin) {
+        MCQ mcq = mcqRepository.findById(questionId).orElseThrow();
+
+        if (!isAdmin) {
+            if (!mcq.getCreator().getEnterpriseId().equals(requesterId)) {
+                throw new RuntimeException("Not authorized to delete this MCQ");
+            }
+            if (mcq.getStatus() != MCQ.Status.DRAFT && mcq.getStatus() != MCQ.Status.REJECTED) {
+                throw new RuntimeException("Can only delete DRAFT or REJECTED questions");
+            }
+        } else {
+            if (mcq.getStatus() == MCQ.Status.DRAFT) {
+                throw new RuntimeException("Admin cannot delete DRAFT questions. Only the creator can delete a DRAFT.");
+            }
+        }
+
+        mcqRepository.delete(mcq);
+    }
+
     public Page<MCQDTO.Response> getMyQuestions(
         String enterpriseId, int page, int size,
         Long stackId, Long topicId, String difficulty, String status) {

@@ -40,6 +40,12 @@ public class MCQController {
         return ResponseEntity.ok(mcqService.updateMCQ(auth.getName(), id, req, isAdmin(auth.getName())));
     }
 
+    @DeleteMapping("/{id}")
+    public ResponseEntity<?> deleteMCQ(@PathVariable Long id, Authentication auth) {
+        mcqService.deleteMCQ(auth.getName(), id, isAdmin(auth.getName()));
+        return ResponseEntity.ok(Map.of("message", "Question deleted successfully"));
+    }
+
     @GetMapping("/my-questions")
     public ResponseEntity<Page<MCQDTO.Response>> getMyQuestions(
             @RequestParam(defaultValue = "0") int page,

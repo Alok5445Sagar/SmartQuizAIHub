@@ -3,6 +3,7 @@ package com.smartquiz.controller;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.hasSize;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -160,6 +161,39 @@ public class MCQControllerTest extends BaseTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Not authorized to edit this MCQ"));
         }
+
+    @Test
+    @DisplayName("DELETE /api/mcq/{id} deletes own DRAFT question")
+    void deleteMCQ_ownDraft_succeeds() throws Exception {
+        MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+
+        mockMvc.perform(delete("/api/mcq/" + mcq.getQuestionId())
+                .header("Authorization", "Bearer " + smeToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.message").value("Question deleted successfully"));
+    }
+
+    @Test
+    @DisplayName("DELETE /api/mcq/{id} fails when deleting another user's question")
+    void deleteMCQ_otherUser_returnsError() throws Exception {
+        MCQ mcq = createMCQ(reviewer, stack, topic, MCQ.Status.DRAFT);
+
+        mockMvc.perform(delete("/api/mcq/" + mcq.getQuestionId())
+                .header("Authorization", "Bearer " + smeToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Not authorized to delete this MCQ"));
+    }
+
+    @Test
+    @DisplayName("DELETE /api/mcq/{id} lets admin delete APPROVED question")
+    void deleteMCQ_adminApproved_succeeds() throws Exception {
+        MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.APPROVED);
+
+        mockMvc.perform(delete("/api/mcq/" + mcq.getQuestionId())
+                .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.message").value("Question deleted successfully"));
+    }
 
     // ── REVIEW ──────────────────────────────────────────────
 

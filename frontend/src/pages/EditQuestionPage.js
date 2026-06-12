@@ -158,6 +158,25 @@ export default function EditQuestionPage() {
     } finally { setLoading(false); }
   };
 
+  const handleDelete = async () => {
+    const confirmed = window.confirm(
+      'Delete this question permanently from the database? This action cannot be undone.'
+    );
+    if (!confirmed) return;
+
+    setLoading('delete');
+    try {
+      await mcqAPI.delete(id);
+      toast.success('Question deleted successfully');
+      goBack();
+    } catch (err) {
+      const msg = err.response?.data?.message || 'Failed to delete question';
+      toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (fetching) return (
     <div className="loading-container" style={{ minHeight: '60vh' }}>
       <div className="spinner spinner-dark" />
@@ -203,6 +222,7 @@ export default function EditQuestionPage() {
           loading={loading}
           checkingDuplicate={checkingDuplicate}
           isEdit
+          onDelete={handleDelete}
           rejectedComments={mcq.status === 'REJECTED' ? mcq.reviewerComments : null}
           showDuplicateCheck={true}
         />

@@ -20,6 +20,7 @@ api.interceptors.response.use(
 export const mcqAPI = {
   create: (data) => api.post('/api/mcq', data),
   update: (id, data) => api.put(`/api/mcq/${id}`, data),
+  delete: (id) => api.delete(`/api/mcq/${id}`),
   getMyQuestions: (page = 0, size = 10, filters = {}) => {
     const params = new URLSearchParams({ page, size });
     if (filters.stackId)    params.append('stackId', filters.stackId);

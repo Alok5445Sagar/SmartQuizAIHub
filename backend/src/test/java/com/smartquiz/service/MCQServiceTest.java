@@ -162,6 +162,37 @@ public class MCQServiceTest extends BaseTest {
             .hasMessageContaining("Admin cannot edit DRAFT");
     }
 
+    @Test
+    @DisplayName("SME can delete own DRAFT question")
+    void deleteMCQ_smeCanDeleteOwnDraft() {
+        MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+
+        mcqService.deleteMCQ(sme.getEnterpriseId(), mcq.getQuestionId(), false);
+
+        assertThat(mcqRepository.findById(mcq.getQuestionId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("SME cannot delete READY_FOR_REVIEW question")
+    void deleteMCQ_smeCannotDeleteReadyForReview() {
+        MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.READY_FOR_REVIEW);
+
+        assertThatThrownBy(() ->
+            mcqService.deleteMCQ(sme.getEnterpriseId(), mcq.getQuestionId(), false))
+            .isInstanceOf(RuntimeException.class)
+            .hasMessageContaining("Can only delete DRAFT or REJECTED questions");
+    }
+
+    @Test
+    @DisplayName("Admin can delete APPROVED question")
+    void deleteMCQ_adminCanDeleteApproved() {
+        MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.APPROVED);
+
+        mcqService.deleteMCQ(admin.getEnterpriseId(), mcq.getQuestionId(), true);
+
+        assertThat(mcqRepository.findById(mcq.getQuestionId())).isEmpty();
+    }
+
     // ── REVIEW ──────────────────────────────────────────────
 
     @Test

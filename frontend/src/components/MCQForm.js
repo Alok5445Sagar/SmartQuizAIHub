@@ -7,7 +7,8 @@ const MCQ_OPTIONS = ['A', 'B', 'C', 'D'];
 
 export default function MCQForm({ initial = {}, onSave, onSaveAndSend, onDuplicateCheck,
                                    loading, checkingDuplicate = false, isEdit = false,
-                                   rejectedComments, showDuplicateCheck = false }) {
+                                   rejectedComments, showDuplicateCheck = false,
+                                   onDelete }) {
   const [stacks, setStacks] = useState([]);
   const [topics, setTopics] = useState([]);
   const [form, setForm] = useState({
@@ -320,6 +321,17 @@ export default function MCQForm({ initial = {}, onSave, onSaveAndSend, onDuplica
       <div className="divider" />
 
       <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+        {isEdit && onDelete && (
+          <button
+            className="btn btn-danger"
+            onClick={onDelete}
+            disabled={loading || checkingDuplicate}
+          >
+            {loading === 'delete'
+              ? <><span className="spinner" /> Deleting...</>
+              : '🗑 Delete Question'}
+          </button>
+        )}
         <button
           className="btn btn-secondary"
           onClick={handleSave}
