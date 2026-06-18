@@ -271,8 +271,21 @@ public class MCQControllerTest extends BaseTest {
     }
 
     @Test
-    @DisplayName("Admin cannot edit DRAFT question")
-    void adminEdit_draft_returns400() throws Exception {
+    @DisplayName("Admin can edit own DRAFT question")
+    void adminEdit_ownDraft_succeeds() throws Exception {
+        MCQ mcq = createMCQ(admin, stack, topic, MCQ.Status.DRAFT);
+
+        mockMvc.perform(put("/api/admin/edit-question/" + mcq.getQuestionId())
+                .header("Authorization", "Bearer " + adminToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(buildUpdate("Admin own draft updated?", false))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.questionStem").value("Admin own draft updated?"));
+    }
+
+    @Test
+    @DisplayName("Admin cannot edit another user's DRAFT question")
+    void adminEdit_otherUsersDraft_returns400() throws Exception {
         MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
 
         mockMvc.perform(put("/api/admin/edit-question/" + mcq.getQuestionId())
@@ -280,7 +293,7 @@ public class MCQControllerTest extends BaseTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(buildUpdate("Admin hack draft?", false))))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value(containsString("Admin cannot edit DRAFT")));
+                .andExpect(jsonPath("$.message").value(containsString("Admin can edit DRAFT questions only if they are the creator")));
     }
 
     @Test

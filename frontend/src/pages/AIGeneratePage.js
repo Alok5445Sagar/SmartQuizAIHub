@@ -11,6 +11,8 @@ export default function AIGeneratePage({ onBack }) {
     topicId: '',
     difficulty: 'Medium',
     numberOfQuestions: 3,
+    generateMCQ: true,
+    generateMSQ: false,
   });
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -39,6 +41,9 @@ export default function AIGeneratePage({ onBack }) {
     if (!form.numberOfQuestions || form.numberOfQuestions < 1 || form.numberOfQuestions > 20) {
       return toast.error('Number of questions must be between 1 and 20');
     }
+    if (!form.generateMCQ && !form.generateMSQ) {
+      return toast.error('Select at least one question type (MCQ or MSQ)');
+    }
     setLoading(true);
     setResult(null);
     try {
@@ -47,6 +52,8 @@ export default function AIGeneratePage({ onBack }) {
         topicId: parseInt(form.topicId),
         difficulty: form.difficulty,
         numberOfQuestions: parseInt(form.numberOfQuestions),
+        generateMCQ: !!form.generateMCQ,
+        generateMSQ: !!form.generateMSQ,
       });
       setResult(res.data);
       toast.success(res.data.message);
@@ -71,7 +78,7 @@ export default function AIGeneratePage({ onBack }) {
 
       <div className="card" style={{ maxWidth: 800 }}>
         {/* Form */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 160px', gap: 16, marginBottom: 24 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 160px', gap: 16, marginBottom: 16 }}>
           <div className="form-group" style={{ margin: 0 }}>
             <label className="form-label">TECHNOLOGY STACK</label>
             <select className="form-select" value={form.stackId} onChange={e => set('stackId', e.target.value)}>
@@ -104,6 +111,39 @@ export default function AIGeneratePage({ onBack }) {
               value={form.numberOfQuestions}
               onChange={e => set('numberOfQuestions', e.target.value)}
             />
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 24 }}>
+          <label className="form-label" style={{ marginBottom: 8, display: 'block' }}>
+            QUESTION TYPES TO GENERATE
+          </label>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            <label style={{
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              padding: '8px 12px', borderRadius: 8,
+              border: '1px solid var(--border)', background: 'var(--bg-card)'
+            }}>
+              <input
+                type="checkbox"
+                checked={form.generateMCQ}
+                onChange={e => set('generateMCQ', e.target.checked)}
+              />
+              <span style={{ fontWeight: 600, fontSize: 13 }}>MCQ (single answer)</span>
+            </label>
+
+            <label style={{
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              padding: '8px 12px', borderRadius: 8,
+              border: '1px solid var(--border)', background: 'var(--bg-card)'
+            }}>
+              <input
+                type="checkbox"
+                checked={form.generateMSQ}
+                onChange={e => set('generateMSQ', e.target.checked)}
+              />
+              <span style={{ fontWeight: 600, fontSize: 13 }}>MSQ (multiple answers)</span>
+            </label>
           </div>
         </div>
 
@@ -159,14 +199,22 @@ export default function AIGeneratePage({ onBack }) {
                       <span style={{ fontSize: 12, background: 'var(--success-light)', color: '#065f46', padding: '2px 8px', borderRadius: 4, fontWeight: 600 }}>
                         ✅ Passed similarity check
                       </span>
+                      <span style={{ fontSize: 12, background: '#ecfeff', color: '#0e7490', padding: '2px 8px', borderRadius: 4, fontWeight: 600 }}>
+                        {(q.questionType || 'MCQ').toUpperCase()}
+                      </span>
                     </div>
                     <p style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>{q.questionStem}</p>
                     <div className="options-grid">
-                      {['A', 'B', 'C', 'D'].map(opt => (
-                        <div key={opt} className={`option-item ${q.correctAnswer === opt ? 'correct' : ''}`}>
+                      {['A', 'B', 'C', 'D', 'E', 'F']
+                        .filter(opt => q[`option${opt}`])
+                        .map(opt => (
+                        <div
+                          key={opt}
+                          className={`option-item ${(q.correctAnswer || '').split(',').map(a => a.trim()).includes(opt) ? 'correct' : ''}`}
+                        >
                           <span className="option-label">{opt}</span>
                           <span style={{ fontSize: 12 }}>{q[`option${opt}`]}</span>
-                          {q.correctAnswer === opt && <span style={{ marginLeft: 'auto' }}>✓</span>}
+                          {(q.correctAnswer || '').split(',').map(a => a.trim()).includes(opt) && <span style={{ marginLeft: 'auto' }}>✓</span>}
                         </div>
                       ))}
                     </div>

@@ -6,6 +6,7 @@ import Pagination from '../components/Pagination';
 import ViewMCQModal from '../components/ViewMCQModal';
 import toast from 'react-hot-toast';
 import { QuestionTypeBadge } from '../components/StatusBadge';
+import { useAuth } from '../context/AuthContext';
 
 function AssignReviewerModal({ mcq, onClose, onDone }) {
   const [reviewers, setReviewers] = useState([]);
@@ -156,7 +157,7 @@ function SimilarityResultModal({ result, onClose }) {
   );
 }
 
-function AdminEditModal({ mcq, onClose, onDone }) {
+function AdminEditModal({ mcq, onClose, onDone, onOpenAssign }) {
   const [loading, setLoading] = useState(false);
   const [checkingDuplicate, setCheckingDuplicate] = useState(false);
   const [similarityResult, setSimilarityResult] = useState(null);
@@ -211,16 +212,28 @@ function AdminEditModal({ mcq, onClose, onDone }) {
   };
 
   const handleSaveAndSend = async (data) => {
-    const result = await runSimilarityCheck(data);
-    if (!result) return;
+    if (!mcq.aiGenerated) {
+      const result = await runSimilarityCheck(data);
+      if (!result) return;
 
-    if (result.hasSimilar) {
-      setSimilarityResult(result);
-      return;
+      if (result.hasSimilar) {
+        setSimilarityResult(result);
+        return;
+      }
     }
 
     setLoading('send');
     try {
+      const canDirectAssign = mcq.status === 'DRAFT';
+
+      if (canDirectAssign) {
+        await adminAPI.editQuestion(mcq.questionId, { ...data, sendForReview: false });
+        toast.success('Question updated. Please assign reviewer.');
+        onClose();
+        onOpenAssign(mcq);
+        return;
+      }
+
       await adminAPI.editQuestion(mcq.questionId, { ...data, sendForReview: true });
       toast.success('Question updated and sent for review!');
       onDone();
@@ -267,7 +280,8 @@ function AdminEditModal({ mcq, onClose, onDone }) {
             loading={loading}
             checkingDuplicate={checkingDuplicate}
             isEdit
-            showDuplicateCheck={true}
+            showDuplicateCheck={!mcq.aiGenerated}
+            saveAndSendLabel={mcq.status === 'DRAFT' ? '👤 Save & Assign Reviewer' : '🚀 Save & Send for Review'}
           />
         </div>
         {similarityResult && (
@@ -282,6 +296,7 @@ function AdminEditModal({ mcq, onClose, onDone }) {
 }
 
 export default function QuestionBankPage() {
+  const { user } = useAuth();
   const [data, setData] = useState(null);
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -361,8 +376,12 @@ export default function QuestionBankPage() {
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  const canAssign = (status) => status === 'READY_FOR_REVIEW';
-  const canAdminEdit = (status) => status !== 'DRAFT';
+  const currentEnterpriseId = user?.enterpriseId;
+  const canAssign = (mcq) =>
+    mcq.status === 'READY_FOR_REVIEW'
+    || (mcq.status === 'DRAFT' && mcq.creatorEnterpriseId === currentEnterpriseId);
+  const canAdminEdit = (mcq) =>
+    mcq.status !== 'DRAFT' || mcq.creatorEnterpriseId === currentEnterpriseId;
 
   const content = data?.content || [];
 
@@ -505,12 +524,12 @@ export default function QuestionBankPage() {
                       <td>
                         <div style={{ display: 'flex', gap: 6 }}>
                           <button className="btn btn-ghost btn-sm" onClick={() => setViewMCQ(mcq)}>👁</button>
-                          {canAssign(mcq.status) && (
+                          {canAssign(mcq) && (
                             <button className="btn btn-primary btn-sm" onClick={() => setAssignMCQ(mcq)}>
                               👤 Assign
                             </button>
                           )}
-                          {canAdminEdit(mcq.status) && (
+                          {canAdminEdit(mcq) && (
                             <button className="btn btn-secondary btn-sm" onClick={() => setEditMCQ(mcq)}>
                               ✏️ Edit
                             </button>
@@ -535,7 +554,7 @@ export default function QuestionBankPage() {
 
       {viewMCQ && <ViewMCQModal mcq={viewMCQ} onClose={() => setViewMCQ(null)} />}
       {assignMCQ && <AssignReviewerModal mcq={assignMCQ} onClose={() => setAssignMCQ(null)} onDone={handleAssignDone} />}
-      {editMCQ && <AdminEditModal mcq={editMCQ} onClose={() => setEditMCQ(null)} onDone={() => { setEditMCQ(null); fetchData(); }} />}
+      {editMCQ && <AdminEditModal mcq={editMCQ} onClose={() => setEditMCQ(null)} onOpenAssign={setAssignMCQ} onDone={() => { setEditMCQ(null); fetchData(); }} />}
     </div>
   );
 }

@@ -25,28 +25,28 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/45</span>
+                <span class='fraction'>0/51</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/42</span>
+                <span class='fraction'>0/48</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>0/16</span>
+                <span class='fraction'>0/17</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/42</span>
+                <span class='fraction'>0/47</span>
             </div>
         
             
@@ -272,7 +272,22 @@
 <a name='L207'></a><a href='#L207'>207</a>
 <a name='L208'></a><a href='#L208'>208</a>
 <a name='L209'></a><a href='#L209'>209</a>
-<a name='L210'></a><a href='#L210'>210</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L210'></a><a href='#L210'>210</a>
+<a name='L211'></a><a href='#L211'>211</a>
+<a name='L212'></a><a href='#L212'>212</a>
+<a name='L213'></a><a href='#L213'>213</a>
+<a name='L214'></a><a href='#L214'>214</a>
+<a name='L215'></a><a href='#L215'>215</a>
+<a name='L216'></a><a href='#L216'>216</a>
+<a name='L217'></a><a href='#L217'>217</a>
+<a name='L218'></a><a href='#L218'>218</a>
+<a name='L219'></a><a href='#L219'>219</a>
+<a name='L220'></a><a href='#L220'>220</a>
+<a name='L221'></a><a href='#L221'>221</a>
+<a name='L222'></a><a href='#L222'>222</a>
+<a name='L223'></a><a href='#L223'>223</a>
+<a name='L224'></a><a href='#L224'>224</a>
+<a name='L225'></a><a href='#L225'>225</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -317,6 +332,19 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -435,7 +463,9 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -484,7 +514,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">import React, { useState, useEffect, useCallback } from 'react';
 import { mcqAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
-import { DifficultyBadge } from '../components/StatusBadge';
+import { DifficultyBadge, QuestionTypeBadge } from '../components/StatusBadge';
 import Pagination from '../components/Pagination';
 import ViewMCQModal from '../components/ViewMCQModal';
 import toast from 'react-hot-toast';
@@ -524,14 +554,27 @@ function <span class="fstat-no" title="function not covered" >ReviewModal(</span
             &lt;/div&gt;
             &lt;p style={{ fontSize: 14, lineHeight: 1.6, marginBottom: 12 }}&gt;{mcq.questionStem}&lt;/p&gt;
             &lt;div className="options-grid"&gt;
-              {['A','B','C','D'].map(<span class="fstat-no" title="function not covered" >op</span>t =&gt; (
-<span class="cstat-no" title="statement not covered" >                &lt;div key={opt} className={`option-item ${mcq.correctAnswer === opt ? 'correct' : ''}`}&gt;</span>
-                  &lt;span className="option-label"&gt;{opt}&lt;/span&gt;
-                  &lt;span style={{ fontSize: 12 }}&gt;{mcq[`option${opt}`]}&lt;/span&gt;
-                  {mcq.correctAnswer === opt &amp;&amp; &lt;span style={{ marginLeft: 'auto' }}&gt;✓&lt;/span&gt;}
-                &lt;/div&gt;
-              ))}
-            &lt;/div&gt;
+                {['A','B','C','D','E','F'].map(<span class="fstat-no" title="function not covered" >op</span>t =&gt; {
+                  const optValue = <span class="cstat-no" title="statement not covered" >mcq[`option${opt}`];</span>
+<span class="cstat-no" title="statement not covered" >                  if (!optValue) <span class="cstat-no" title="statement not covered" >return null;</span></span>
+                  const correctAnswers = <span class="cstat-no" title="statement not covered" >mcq.correctAnswer</span>
+                    ? mcq.correctAnswer.split(',').map(<span class="fstat-no" title="function not covered" >s </span>=&gt; <span class="cstat-no" title="statement not covered" >s.trim())</span>
+                    : [];
+                  const isCorrect = <span class="cstat-no" title="statement not covered" >correctAnswers.includes(opt);</span>
+<span class="cstat-no" title="statement not covered" >                  return (</span>
+                    &lt;div key={opt} className={`option-item ${isCorrect ? 'correct' : ''}`}&gt;
+                      &lt;span className="option-label"&gt;{opt}&lt;/span&gt;
+                      &lt;span style={{ fontSize: 12 }}&gt;{optValue}&lt;/span&gt;
+                      {isCorrect &amp;&amp; &lt;span style={{ marginLeft: 'auto' }}&gt;✓&lt;/span&gt;}
+                    &lt;/div&gt;
+                  );
+                })}
+              &lt;/div&gt;
+              {mcq.questionType === 'MSQ' &amp;&amp; (
+                &lt;p style={{ fontSize: 11, color: 'var(--success)', marginTop: 6 }}&gt;
+                  ✓ Correct answers: {mcq.correctAnswer}
+                &lt;/p&gt;
+              )}
           &lt;/div&gt;
 &nbsp;
           {/* Action */}
@@ -608,7 +651,7 @@ export default function <span class="fstat-no" title="function not covered" >MyP
       &lt;div className="page-header"&gt;
         &lt;div&gt;
           &lt;h1 className="page-title"&gt;My Pending Reviews&lt;/h1&gt;
-          &lt;p className="page-subtitle"&gt;MCQs assigned to you for review&lt;/p&gt;
+          &lt;p className="page-subtitle"&gt;Questions assigned to you for review&lt;/p&gt;
         &lt;/div&gt;
         {data &amp;&amp; (
           &lt;div style={{ background: 'var(--warning-light)', color: '#92400e', padding: '6px 14px', borderRadius: 100, fontSize: 13, fontWeight: 600 }}&gt;
@@ -624,7 +667,7 @@ export default function <span class="fstat-no" title="function not covered" >MyP
           &lt;div className="empty-state"&gt;
             &lt;div className="empty-icon"&gt;🎉&lt;/div&gt;
             &lt;h3&gt;No pending reviews&lt;/h3&gt;
-            &lt;p&gt;You're all caught up! No MCQs assigned for review.&lt;/p&gt;
+            &lt;p&gt;You're all caught up! No questions assigned for review.&lt;/p&gt;
           &lt;/div&gt;
         ) : (
           &lt;&gt;
@@ -633,6 +676,7 @@ export default function <span class="fstat-no" title="function not covered" >MyP
                 &lt;thead&gt;
                   &lt;tr&gt;
                     &lt;th&gt;#&lt;/th&gt;
+                    &lt;th&gt;Type&lt;/th&gt;
                     &lt;th&gt;Question&lt;/th&gt;
                     &lt;th&gt;Stack&lt;/th&gt;
                     &lt;th&gt;Topic&lt;/th&gt;
@@ -648,6 +692,7 @@ export default function <span class="fstat-no" title="function not covered" >MyP
                       &lt;td style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}&gt;
                         {page * 10 + idx + 1}
                       &lt;/td&gt;
+                      &lt;td&gt;&lt;QuestionTypeBadge type={mcq.questionType} aiGenerated={mcq.aiGenerated} /&gt;&lt;/td&gt;
                       &lt;td&gt;
                         &lt;div className="truncate" style={{ maxWidth: 260 }} title={mcq.questionStem}&gt;
                           {mcq.questionStem}
@@ -697,7 +742,7 @@ export default function <span class="fstat-no" title="function not covered" >MyP
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-05-27T21:03:32.270Z
+                at 2026-06-12T12:13:21.712Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

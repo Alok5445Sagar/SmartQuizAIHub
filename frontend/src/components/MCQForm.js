@@ -8,7 +8,8 @@ const MCQ_OPTIONS = ['A', 'B', 'C', 'D'];
 export default function MCQForm({ initial = {}, onSave, onSaveAndSend, onDuplicateCheck,
                                    loading, checkingDuplicate = false, isEdit = false,
                                    rejectedComments, showDuplicateCheck = false,
-                                   onDelete }) {
+                                   onDelete,
+                                   saveAndSendLabel = '🚀 Save & Send for Review' }) {
   const [stacks, setStacks] = useState([]);
   const [topics, setTopics] = useState([]);
   const [form, setForm] = useState({
@@ -362,7 +363,7 @@ export default function MCQForm({ initial = {}, onSave, onSaveAndSend, onDuplica
             ? <><span className="spinner" /> Checking similarity...</>
             : loading === 'send'
               ? <><span className="spinner" /> Submitting...</>
-              : '🚀 Save & Send for Review'}
+              : saveAndSendLabel}
         </button>
       </div>
     </div>

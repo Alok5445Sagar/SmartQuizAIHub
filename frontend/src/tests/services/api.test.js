@@ -15,7 +15,7 @@ jest.mock('axios', () => {
   return { default: mockAxios, ...mockAxios };
 });
 
-import { mcqAPI, adminAPI, referenceAPI } from '../../services/api';
+import { mcqAPI, adminAPI, referenceAPI, aiAPI } from '../../services/api';
 import api from '../../services/api';
 
 describe('mcqAPI', () => {
@@ -113,5 +113,83 @@ describe('referenceAPI', () => {
     api.get = jest.fn().mockResolvedValue({ data: [] });
     await referenceAPI.getTopics(3);
     expect(api.get).toHaveBeenCalledWith('/api/reference/topics/3');
+  });
+});
+
+describe('aiAPI', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  test('chat posts to /api/ai/chat', async () => {
+    api.post = jest.fn().mockResolvedValue({ data: { answer: 'hello' } });
+    const payload = { message: 'hi', history: [{ role: 'user', content: 'hi' }] };
+    await aiAPI.chat(payload);
+    expect(api.post).toHaveBeenCalledWith('/api/ai/chat', payload);
+  });
+
+  test('getChatHistory gets /api/ai/chat/history', async () => {
+    api.get = jest.fn().mockResolvedValue({ data: { messages: [] } });
+    await aiAPI.getChatHistory(25);
+    expect(api.get).toHaveBeenCalledWith('/api/ai/chat/history?limit=25');
+  });
+
+  test('getChatHistory includes sessionId when provided', async () => {
+    api.get = jest.fn().mockResolvedValue({ data: { messages: [] } });
+    await aiAPI.getChatHistory(25, 'session-abc');
+    expect(api.get).toHaveBeenCalledWith('/api/ai/chat/history?limit=25&sessionId=session-abc');
+  });
+
+  test('getChatSessions gets /api/ai/chat/sessions', async () => {
+    api.get = jest.fn().mockResolvedValue({ data: { sessions: [] } });
+    await aiAPI.getChatSessions(5);
+    expect(api.get).toHaveBeenCalledWith('/api/ai/chat/sessions?limit=5');
+  });
+
+  test('getChatSuggestions gets /api/ai/chat/suggestions', async () => {
+    api.get = jest.fn().mockResolvedValue({ data: { suggestions: [] } });
+    await aiAPI.getChatSuggestions();
+    expect(api.get).toHaveBeenCalledWith('/api/ai/chat/suggestions');
+  });
+
+  test('streamChat parses delta and done events', async () => {
+    const { TextEncoder, TextDecoder } = require('util');
+    global.TextEncoder = TextEncoder;
+    global.TextDecoder = TextDecoder;
+
+    const chunks = [
+      'event: message\n',
+      'data: {"delta":"Hello","done":false}\n\n',
+      'event: done\n',
+      'data: {"delta":"","done":true}\n\n',
+    ];
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      body: {
+        getReader: () => {
+          let index = 0;
+          return {
+            read: async () => {
+              if (index >= chunks.length) {
+                return { done: true, value: undefined };
+              }
+              const value = new TextEncoder().encode(chunks[index]);
+              index += 1;
+              return { done: false, value };
+            },
+          };
+        },
+      },
+    });
+
+    const onDelta = jest.fn();
+    const onDone = jest.fn();
+
+    await aiAPI.streamChat(
+      { message: 'Hi', history: [] },
+      { onDelta, onDone }
+    );
+
+    expect(onDelta).toHaveBeenCalledWith('Hello');
+    expect(onDone).toHaveBeenCalled();
   });
 });

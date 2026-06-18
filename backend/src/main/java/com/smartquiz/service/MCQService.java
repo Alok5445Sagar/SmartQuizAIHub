@@ -1,6 +1,8 @@
 package com.smartquiz.service;
 
+import com.smartquiz.ai.AIService;
 import com.smartquiz.dto.MCQDTO;
+import com.smartquiz.dto.SimilarityCheckResponse;
 import com.smartquiz.entity.*;
 import com.smartquiz.repository.*;
 import org.apache.poi.ss.usermodel.*;
@@ -26,17 +28,29 @@ public class MCQService {
     @Autowired private TechnologyStackRepository stackRepository;
     @Autowired private TopicRepository topicRepository;
     @Autowired private UserStackMappingRepository userStackMappingRepository;
+    @Autowired @org.springframework.context.annotation.Lazy private AIService aiService;
 
     public MCQDTO.Response createMCQ(String creatorId, MCQDTO.CreateRequest req) {
         User creator = userRepository.findByEnterpriseId(creatorId).orElseThrow();
         TechnologyStack stack = stackRepository.findById(req.getStackId()).orElseThrow();
         Topic topic = topicRepository.findById(req.getTopicId()).orElseThrow();
 
+        MCQ.QuestionType normalizedType = normalizeQuestionType(req.getQuestionType());
+        String normalizedCorrectAnswer = normalizeCorrectAnswer(
+            req.getCorrectAnswer(),
+            normalizedType,
+            req.getOptionA(),
+            req.getOptionB(),
+            req.getOptionC(),
+            req.getOptionD(),
+            req.getOptionE(),
+            req.getOptionF());
+
         String normalizedStem = req.getQuestionStem().trim().replaceAll("\\s+", " ");
         // Duplicate check policy:
         // - AI-generated MCQs are validated during generation/create flow.
         // - Manually added MCQs (Add UI) are validated on Edit page/update flow.
-        if (req.isAiGenerated() && mcqRepository.existsByQuestionStemAndStackAndTopicNonDraft(
+        if (req.isAiGenerated() && mcqRepository.existsByQuestionStemAndStackAndTopic(
             normalizedStem, req.getStackId(), req.getTopicId())) {
             throw new RuntimeException(
                 "Duplicate question: A question with the same stem already exists in this stack and topic.");
@@ -44,8 +58,7 @@ public class MCQService {
 
         MCQ mcq = new MCQ();
         mcq.setQuestionStem(normalizedStem);
-        mcq.setQuestionType(req.getQuestionType() != null ?
-                MCQ.QuestionType.valueOf(req.getQuestionType()) : MCQ.QuestionType.MCQ);
+        mcq.setQuestionType(normalizedType);
         mcq.setStack(stack);
         mcq.setTopic(topic);
         mcq.setDifficulty(MCQ.Difficulty.valueOf(req.getDifficulty()));
@@ -55,7 +68,7 @@ public class MCQService {
         mcq.setOptionD(req.getOptionD());
         mcq.setOptionE(req.getOptionE());
         mcq.setOptionF(req.getOptionF());
-        mcq.setCorrectAnswer(req.getCorrectAnswer());
+        mcq.setCorrectAnswer(normalizedCorrectAnswer);
         mcq.setCreator(creator);
         mcq.setStatus(req.isSendForReview() ? MCQ.Status.READY_FOR_REVIEW : MCQ.Status.DRAFT);
         mcq.setAiGenerated(req.isAiGenerated());
@@ -79,14 +92,28 @@ public class MCQService {
                 throw new RuntimeException("Can only edit DRAFT or REJECTED questions");
             }
         } else {
-            // Admin can edit any status EXCEPT DRAFT
+            // Admin can edit any non-draft question.
+            // For DRAFT, only the admin who created it can edit.
             if (mcq.getStatus() == MCQ.Status.DRAFT) {
-                throw new RuntimeException("Admin cannot edit DRAFT questions. Only the creator can edit a DRAFT.");
+                if (!mcq.getCreator().getEnterpriseId().equals(updaterId)) {
+                    throw new RuntimeException("Admin can edit DRAFT questions only if they are the creator.");
+                }
             }
         }
 
         TechnologyStack stack = stackRepository.findById(req.getStackId()).orElseThrow();
         Topic topic = topicRepository.findById(req.getTopicId()).orElseThrow();
+
+        MCQ.QuestionType normalizedType = normalizeQuestionType(req.getQuestionType());
+        String normalizedCorrectAnswer = normalizeCorrectAnswer(
+            req.getCorrectAnswer(),
+            normalizedType,
+            req.getOptionA(),
+            req.getOptionB(),
+            req.getOptionC(),
+            req.getOptionD(),
+            req.getOptionE(),
+            req.getOptionF());
 
         String normalizedStem = req.getQuestionStem().trim().replaceAll("\\s+", " ");
         // Duplicate check policy for updates:
@@ -101,8 +128,7 @@ public class MCQService {
         }
 
         mcq.setQuestionStem(normalizedStem);
-        mcq.setQuestionType(req.getQuestionType() != null ?
-                MCQ.QuestionType.valueOf(req.getQuestionType()) : MCQ.QuestionType.MCQ);
+        mcq.setQuestionType(normalizedType);
         mcq.setStack(stack);
         mcq.setTopic(topic);
         mcq.setDifficulty(MCQ.Difficulty.valueOf(req.getDifficulty()));
@@ -112,7 +138,7 @@ public class MCQService {
         mcq.setOptionD(req.getOptionD());
         mcq.setOptionE(req.getOptionE());
         mcq.setOptionF(req.getOptionF());
-        mcq.setCorrectAnswer(req.getCorrectAnswer());
+        mcq.setCorrectAnswer(normalizedCorrectAnswer);
 
 
         if (req.isSendForReview()) {
@@ -380,7 +406,27 @@ public class MCQService {
             }
             seenInFile.add(fileKey);
 
-            // Manual bulk-uploaded questions are duplicate-checked on Edit page before review submission.
+            // Bulk upload duplicate checks must run at upload time against all DB statuses.
+            SimilarityCheckResponse similarityResponse = aiService.checkSimilarity(
+                    stem,
+                    optA,
+                    optB,
+                    optC,
+                    optD,
+                    optE.isBlank() ? null : optE,
+                    optF.isBlank() ? null : optF,
+                    stackOpt.get().getStackId(),
+                    topicOpt.get().getTopicId(),
+                    null);
+            if (similarityResponse.isHasSimilar()) {
+                String similarIds = similarityResponse.getSimilarQuestions().stream()
+                    .map(q -> String.valueOf(q.getQuestionId()))
+                    .collect(Collectors.joining(", "));
+                errors.add("Row " + rowNum
+                    + ": Duplicate/similar question detected against existing questions"
+                    + (similarIds.isBlank() ? "." : " (IDs: " + similarIds + ")."));
+                continue;
+            }
 
             MCQ mcq = new MCQ();
             mcq.setQuestionStem(stem);
@@ -485,5 +531,68 @@ public class MCQService {
             case BOOLEAN -> String.valueOf(cell.getBooleanCellValue());
             default -> "";
         };
+    }
+
+    private MCQ.QuestionType normalizeQuestionType(String questionType) {
+        if (questionType == null || questionType.isBlank()) {
+            return MCQ.QuestionType.MCQ;
+        }
+        return "MSQ".equalsIgnoreCase(questionType.trim()) ? MCQ.QuestionType.MSQ : MCQ.QuestionType.MCQ;
+    }
+
+    private String normalizeCorrectAnswer(
+            String correctAnswer,
+            MCQ.QuestionType questionType,
+            String optionA,
+            String optionB,
+            String optionC,
+            String optionD,
+            String optionE,
+            String optionF) {
+
+        List<String> orderedOptions = List.of("A", "B", "C", "D", "E", "F");
+        Map<String, String> optionMap = new HashMap<>();
+        optionMap.put("A", optionA);
+        optionMap.put("B", optionB);
+        optionMap.put("C", optionC);
+        optionMap.put("D", optionD);
+        optionMap.put("E", optionE);
+        optionMap.put("F", optionF);
+
+        Set<String> parsed = new HashSet<>();
+        if (correctAnswer != null) {
+            String[] tokens = correctAnswer.toUpperCase().split("[,\\s]+");
+            for (String token : tokens) {
+                if (token.matches("^[A-F]$")) {
+                    parsed.add(token);
+                }
+            }
+        }
+
+        if (questionType == MCQ.QuestionType.MCQ) {
+            if (parsed.size() != 1) {
+                throw new RuntimeException("MCQ requires exactly one correct answer from A to D.");
+            }
+            String answer = parsed.iterator().next();
+            if (!List.of("A", "B", "C", "D").contains(answer)) {
+                throw new RuntimeException("MCQ correct answer must be one of A, B, C, D.");
+            }
+            return answer;
+        }
+
+        if (parsed.size() < 2) {
+            throw new RuntimeException("MSQ requires at least 2 correct answers.");
+        }
+
+        for (String answer : parsed) {
+            String optionValue = optionMap.get(answer);
+            if (optionValue == null || optionValue.isBlank()) {
+                throw new RuntimeException("MSQ correct answer '" + answer + "' must map to a non-empty option.");
+            }
+        }
+
+        return orderedOptions.stream()
+                .filter(parsed::contains)
+                .collect(Collectors.joining(","));
     }
 }

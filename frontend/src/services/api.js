@@ -60,6 +60,70 @@ export const referenceAPI = {
 export const aiAPI = {
   generateQuestions: (data) => api.post('/api/ai/generate', data),
   checkSimilarity: (data) => api.post('/api/ai/similarity-check', data),
+  chat: (data) => api.post('/api/ai/chat', data),
+  getChatHistory: (limit = 40, sessionId = '') => {
+    const params = new URLSearchParams({ limit });
+    if (sessionId) params.append('sessionId', sessionId);
+    return api.get(`/api/ai/chat/history?${params.toString()}`);
+  },
+  getChatSessions: (limit = 5) => api.get(`/api/ai/chat/sessions?limit=${limit}`),
+  getChatSuggestions: () => api.get('/api/ai/chat/suggestions'),
+  streamChat: async (data, handlers = {}) => {
+    const token = localStorage.getItem('token');
+    const baseURL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
+    const response = await fetch(`${baseURL}/api/ai/chat/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok || !response.body) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(
+        errorText ||
+        response.statusText ||
+        `Streaming failed with status ${response.status}`
+      );
+    }
+
+    const decoder = new TextDecoder();
+    const reader = response.body.getReader();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split('\n\n');
+      buffer = events.pop() || '';
+
+      for (const rawEvent of events) {
+        const lines = rawEvent.split('\n');
+        const dataLine = lines.find((line) => line.startsWith('data:'));
+        if (!dataLine) continue;
+
+        const payloadText = dataLine.slice(5).trim();
+        if (!payloadText) continue;
+
+        try {
+          const payload = JSON.parse(payloadText);
+          if (payload.done) {
+            handlers.onDone?.();
+          } else if (payload.delta) {
+            handlers.onDelta?.(payload.delta);
+          }
+        } catch {
+          // Ignore malformed event payloads.
+        }
+      }
+    }
+  },
 };
 
 export default api;

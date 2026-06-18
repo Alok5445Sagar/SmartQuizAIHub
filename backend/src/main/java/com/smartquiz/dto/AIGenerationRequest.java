@@ -12,4 +12,14 @@ public class AIGenerationRequest {
     private Long topicId;
     private String difficulty;
     private int numberOfQuestions;
+    private Boolean generateMCQ;
+    private Boolean generateMSQ;
+
+    public boolean isGenerateMCQEnabled() {
+        return generateMCQ == null || Boolean.TRUE.equals(generateMCQ);
+    }
+
+    public boolean isGenerateMSQEnabled() {
+        return Boolean.TRUE.equals(generateMSQ);
+    }
 }

@@ -23,6 +23,12 @@ public class TestConfig {
                 Mockito.anyInt(), Mockito.any(), Mockito.any()))
                 .thenReturn(Collections.emptyList());
 
+        Mockito.when(mock.generateQuestions(
+            Mockito.any(), Mockito.any(), Mockito.anyString(),
+            Mockito.anyInt(), Mockito.any(), Mockito.any(),
+            Mockito.anyString(), Mockito.anyList()))
+            .thenReturn(Collections.emptyList());
+
         Mockito.when(mock.checkSimilarity(
                 Mockito.anyString(), Mockito.anyString(), Mockito.anyString(),
                 Mockito.anyString(), Mockito.anyString(), Mockito.any(),

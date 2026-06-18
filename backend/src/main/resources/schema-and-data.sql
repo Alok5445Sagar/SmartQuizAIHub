@@ -68,6 +68,16 @@ CREATE TABLE IF NOT EXISTS mcqs (
     CONSTRAINT fk_mcq_reviewer FOREIGN KEY (reviewer_enterprise_id) REFERENCES users(enterprise_id)
 );
 
+CREATE TABLE IF NOT EXISTS chat_messages (
+    chat_message_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    enterprise_id   VARCHAR(100) NOT NULL,
+    session_id      VARCHAR(100) NOT NULL,
+    role            ENUM('USER','ASSISTANT') NOT NULL,
+    content         TEXT NOT NULL,
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_chat_message_user FOREIGN KEY (enterprise_id) REFERENCES users(enterprise_id)
+);
+
 -- ============================================================
 -- SEED DATA — Technology Stacks
 -- ============================================================

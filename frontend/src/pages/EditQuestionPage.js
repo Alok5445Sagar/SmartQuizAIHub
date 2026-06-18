@@ -1,9 +1,87 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { mcqAPI, aiAPI } from '../services/api';
+import { mcqAPI, aiAPI, adminAPI } from '../services/api';
 import MCQForm from '../components/MCQForm';
 import StatusBadge from '../components/StatusBadge';
 import toast from 'react-hot-toast';
+import { useAuth } from '../context/AuthContext';
+
+function AssignReviewerModal({ mcq, onClose, onDone }) {
+  const [reviewers, setReviewers] = useState([]);
+  const [selectedReviewer, setSelectedReviewer] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(true);
+
+  useEffect(() => {
+    adminAPI.getReviewers(mcq.stackId, mcq.creatorEnterpriseId)
+      .then(r => setReviewers(r.data))
+      .catch(() => toast.error('Failed to load reviewers'))
+      .finally(() => setFetching(false));
+  }, [mcq.stackId, mcq.creatorEnterpriseId]);
+
+  const handleAssign = async () => {
+    if (!selectedReviewer) return toast.error('Please select a reviewer');
+    setLoading(true);
+    try {
+      await adminAPI.assignReviewer(mcq.questionId, selectedReviewer);
+      toast.success('Reviewer assigned successfully!');
+      onDone();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to assign reviewer');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 500 }}>
+        <div className="modal-header">
+          <h2>Assign Reviewer</h2>
+          <button className="modal-close" onClick={onClose}>×</button>
+        </div>
+        <div className="modal-body">
+          {fetching ? (
+            <div style={{ textAlign: 'center', padding: 20 }}><div className="spinner spinner-dark" style={{ margin: '0 auto' }} /></div>
+          ) : reviewers.length === 0 ? (
+            <div className="alert alert-info">No eligible reviewers found for this stack.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {reviewers.map(r => (
+                <label key={r.enterpriseId} style={{
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '10px 14px',
+                  border: `1.5px solid ${selectedReviewer === r.enterpriseId ? 'var(--accent)' : 'var(--border)'}`,
+                  borderRadius: 10, cursor: 'pointer',
+                  background: selectedReviewer === r.enterpriseId ? 'var(--accent-light)' : 'var(--bg-card)',
+                }}>
+                  <input
+                    type="radio"
+                    name="reviewer"
+                    value={r.enterpriseId}
+                    checked={selectedReviewer === r.enterpriseId}
+                    onChange={() => setSelectedReviewer(r.enterpriseId)}
+                    style={{ accentColor: 'var(--accent)' }}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>{r.fullName}</div>
+                    <div style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{r.enterpriseId}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleAssign} disabled={loading || !selectedReviewer || fetching}>
+            {loading ? <><span className="spinner" /> Assigning...</> : '👤 Assign Reviewer'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function SimilarityResultModal({ result, onClose, onProceed }) {
   return (
@@ -60,6 +138,7 @@ function SimilarityResultModal({ result, onClose, onProceed }) {
 }
 
 export default function EditQuestionPage() {
+  const { user } = useAuth();
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -70,7 +149,7 @@ export default function EditQuestionPage() {
   const [fetching, setFetching] = useState(true);
   const [similarityResult, setSimilarityResult] = useState(null);
   const [checkingDuplicate, setCheckingDuplicate] = useState(false);
-  const [lastCheckedData, setLastCheckedData] = useState(null);
+  const [assignAfterSave, setAssignAfterSave] = useState(false);
 
   useEffect(() => {
     mcqAPI.getById(id)
@@ -109,7 +188,11 @@ export default function EditQuestionPage() {
   };
 
   const handleDuplicateCheck = async (data) => {
-    setLastCheckedData(data);
+    if (mcq?.aiGenerated) {
+      toast('Duplicate check is skipped for AI-generated questions.', { icon: 'ℹ️' });
+      return;
+    }
+
     const result = await runSimilarityCheck(data);
     if (!result) return;
 
@@ -135,14 +218,15 @@ export default function EditQuestionPage() {
   };
 
   const handleSaveAndSend = async (data) => {
-    // Always run similarity check before sending for review
-    setLastCheckedData(data);
-    const result = await runSimilarityCheck(data);
-    if (!result) return;
+    // AI-generated questions are pre-checked during generation; skip edit-page duplicate check.
+    if (!mcq?.aiGenerated) {
+      const result = await runSimilarityCheck(data);
+      if (!result) return;
 
-    if (result.hasSimilar) {
-      setSimilarityResult(result);
-      return; // Block — show modal
+      if (result.hasSimilar) {
+        setSimilarityResult(result);
+        return; // Block — show modal
+      }
     }
 
     // Similarity passed — proceed to save and send
@@ -156,6 +240,30 @@ export default function EditQuestionPage() {
       toast.error(msg.includes('uplicate') ? '❌ ' + msg : msg,
         { duration: msg.includes('uplicate') ? 5000 : 3000 });
     } finally { setLoading(false); }
+  };
+
+  const handleSaveAndAssign = async (data) => {
+    if (!mcq?.aiGenerated) {
+      const result = await runSimilarityCheck(data);
+      if (!result) return;
+      if (result.hasSimilar) {
+        setSimilarityResult(result);
+        return;
+      }
+    }
+
+    setLoading('send');
+    try {
+      await mcqAPI.update(id, { ...data, sendForReview: false });
+      toast.success('Question updated. Please assign reviewer.');
+      setAssignAfterSave(true);
+    } catch (err) {
+      const msg = err.response?.data?.message || 'Failed to update';
+      toast.error(msg.includes('uplicate') ? '❌ ' + msg : msg,
+        { duration: msg.includes('uplicate') ? 5000 : 3000 });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleDelete = async () => {
@@ -200,6 +308,11 @@ export default function EditQuestionPage() {
     correctAnswer: mcq.correctAnswer,
   };
 
+  const isAdmin = user?.role === 'ADMIN';
+  const isAdminOwnDraft = isAdmin
+    && mcq.status === 'DRAFT'
+    && mcq.creatorEnterpriseId === user?.enterpriseId;
+
   return (
     <div>
       <div className="page-header">
@@ -217,14 +330,15 @@ export default function EditQuestionPage() {
         <MCQForm
           initial={initial}
           onSave={handleSave}
-          onSaveAndSend={handleSaveAndSend}
+          onSaveAndSend={isAdminOwnDraft ? handleSaveAndAssign : handleSaveAndSend}
           onDuplicateCheck={handleDuplicateCheck}
           loading={loading}
           checkingDuplicate={checkingDuplicate}
           isEdit
           onDelete={handleDelete}
           rejectedComments={mcq.status === 'REJECTED' ? mcq.reviewerComments : null}
-          showDuplicateCheck={true}
+          showDuplicateCheck={!mcq.aiGenerated}
+          saveAndSendLabel={isAdminOwnDraft ? '👤 Save & Assign Reviewer' : '🚀 Save & Send for Review'}
         />
       </div>
 
@@ -233,6 +347,17 @@ export default function EditQuestionPage() {
           result={similarityResult}
           onClose={() => setSimilarityResult(null)}
           onProceed={() => setSimilarityResult(null)}
+        />
+      )}
+
+      {assignAfterSave && (
+        <AssignReviewerModal
+          mcq={mcq}
+          onClose={() => setAssignAfterSave(false)}
+          onDone={() => {
+            setAssignAfterSave(false);
+            goBack();
+          }}
         />
       )}
     </div>

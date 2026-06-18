@@ -3,14 +3,24 @@ package com.smartquiz.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.io.ByteArrayOutputStream;
+
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
+import org.springframework.mock.web.MockMultipartFile;
 
+import com.smartquiz.ai.AIService;
 import com.smartquiz.BaseTest;
 import com.smartquiz.dto.MCQDTO;
+import com.smartquiz.dto.SimilarityCheckResponse;
 import com.smartquiz.entity.MCQ;
 import com.smartquiz.entity.TechnologyStack;
 import com.smartquiz.entity.Topic;
@@ -21,6 +31,7 @@ import com.smartquiz.entity.UserStackMapping;
 public class MCQServiceTest extends BaseTest {
 
     @Autowired private MCQService mcqService;
+    @Autowired private AIService aiService;
 
     private User sme, admin, reviewer;
     private TechnologyStack stack;
@@ -28,6 +39,22 @@ public class MCQServiceTest extends BaseTest {
 
     @BeforeEach
     void setUp() {
+        Mockito.reset(aiService);
+        Mockito.when(aiService.generateQuestions(
+            Mockito.any(), Mockito.any(), Mockito.anyString(),
+            Mockito.anyInt(), Mockito.any(), Mockito.any()))
+            .thenReturn(java.util.Collections.emptyList());
+        Mockito.when(aiService.generateQuestions(
+            Mockito.any(), Mockito.any(), Mockito.anyString(),
+            Mockito.anyInt(), Mockito.any(), Mockito.any(),
+            Mockito.anyString(), Mockito.anyList()))
+            .thenReturn(java.util.Collections.emptyList());
+        Mockito.when(aiService.checkSimilarity(
+            Mockito.anyString(), Mockito.anyString(), Mockito.anyString(),
+            Mockito.anyString(), Mockito.anyString(), Mockito.any(),
+            Mockito.any(), Mockito.any(), Mockito.any(), Mockito.any()))
+            .thenReturn(new SimilarityCheckResponse(false, java.util.Collections.emptyList()));
+
         sme      = createSME("svc.sme", "Service SME");
         admin    = createAdmin("svc.admin");
         reviewer = createSME("svc.reviewer", "Service Reviewer");
@@ -152,14 +179,23 @@ public class MCQServiceTest extends BaseTest {
     }
 
     @Test
-    @DisplayName("Admin cannot update DRAFT question")
-    void updateMCQ_adminCannotUpdateDraft() {
+        @DisplayName("Admin can update own DRAFT question")
+        void updateMCQ_adminCanUpdateOwnDraft() {
+        MCQ mcq = createMCQ(admin, stack, topic, MCQ.Status.DRAFT);
+        MCQDTO.Response r = mcqService.updateMCQ(
+            admin.getEnterpriseId(), mcq.getQuestionId(), buildUpdate("Admin own draft?", false), true);
+        assertThat(r.getQuestionStem()).isEqualTo("Admin own draft?");
+        }
+
+        @Test
+        @DisplayName("Admin cannot update another user's DRAFT question")
+        void updateMCQ_adminCannotUpdateOtherUsersDraft() {
         MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
         assertThatThrownBy(() ->
             mcqService.updateMCQ(admin.getEnterpriseId(), mcq.getQuestionId(),
                     buildUpdate("Admin hack draft?", false), true))
             .isInstanceOf(RuntimeException.class)
-            .hasMessageContaining("Admin cannot edit DRAFT");
+            .hasMessageContaining("Admin can edit DRAFT questions only if they are the creator");
     }
 
     @Test
@@ -516,6 +552,23 @@ void createMCQ_aiGeneratedDuplicateStemApproved_throwsException() {
             .hasMessageContaining("Duplicate question");
 }
 
+    @Test
+    @DisplayName("AI-generated MCQ create fails when duplicate stem exists in DRAFT status")
+    void createMCQ_aiGeneratedDuplicateStemDraft_throwsException() {
+        MCQ draft = createMCQ(sme, stack, topic, MCQ.Status.DRAFT);
+        draft.setQuestionStem("Test question?");
+        mcqRepository.save(draft);
+
+        MCQDTO.CreateRequest aiReq = new MCQDTO.CreateRequest(
+            "Test question?", "MCQ",
+            stack.getStackId(), topic.getTopicId(), "Easy",
+            "Option A", "Option B", "Option C", "Option D", null, null, "B", false, true);
+
+        assertThatThrownBy(() -> mcqService.createMCQ(sme.getEnterpriseId(), aiReq))
+            .isInstanceOf(RuntimeException.class)
+            .hasMessageContaining("Duplicate question");
+    }
+
 @Test
 @DisplayName("Update MCQ to MSQ type succeeds")
 void updateMCQ_changeTypeToMSQ_succeeds() {
@@ -534,6 +587,50 @@ void updateMCQ_changeTypeToMSQ_succeeds() {
     assertThat(r.getCorrectAnswer()).isEqualTo("A,C,E");
 }
 
+    @Test
+    @DisplayName("Bulk upload rejects row when similarity check finds existing duplicate")
+    void bulkUpload_duplicateDetectedBySimilarity_rejected() throws Exception {
+        MCQ existing = createMCQ(sme, stack, topic, MCQ.Status.APPROVED);
+        existing.setQuestionStem("What is polymorphism in Java?");
+        existing.setOptionA("Ability of object to take many forms");
+        existing.setOptionB("A keyword");
+        existing.setOptionC("A package");
+        existing.setOptionD("A compiler feature");
+        existing.setCorrectAnswer("A");
+        mcqRepository.save(existing);
+
+        Mockito.when(aiService.checkSimilarity(
+            Mockito.anyString(), Mockito.anyString(), Mockito.anyString(),
+            Mockito.anyString(), Mockito.anyString(), Mockito.any(),
+            Mockito.any(), Mockito.eq(stack.getStackId()), Mockito.eq(topic.getTopicId()), Mockito.isNull()))
+            .thenReturn(new SimilarityCheckResponse(true, java.util.List.of(
+                new SimilarityCheckResponse.SimilarQuestion(
+                    existing.getQuestionId(),
+                    92,
+                    existing.getQuestionStem(),
+                    existing.getOptionA(),
+                    existing.getOptionB(),
+                    existing.getOptionC(),
+                    existing.getOptionD(),
+                    existing.getOptionE(),
+                    existing.getOptionF(),
+                    existing.getCorrectAnswer()))));
+
+        MockMultipartFile file = buildBulkUploadFile(
+            stack.getStackName(),
+            "What is polymorphism in Java?",
+            "Ability of object to take many forms",
+            "A keyword",
+            "A package",
+            "A compiler feature",
+            "A");
+
+        assertThatThrownBy(() -> mcqService.bulkUpload(sme.getEnterpriseId(), file))
+            .isInstanceOf(RuntimeException.class)
+            .hasMessageContaining("No questions were imported")
+            .hasMessageContaining("Duplicate/similar question detected against existing questions");
+    }
+
     // ── HELPERS ───────────────────────────────────────────
 
     private MCQDTO.CreateRequest buildCreate(boolean send) {
@@ -546,5 +643,48 @@ private MCQDTO.UpdateRequest buildUpdate(String stem, boolean send) {
     return new MCQDTO.UpdateRequest(stem, "MCQ", stack.getStackId(),
             topic.getTopicId(), "Medium",
             "Option A", "Option B", "Option C", "Option D", null, null, "A", send);
+}
+
+private MockMultipartFile buildBulkUploadFile(String stackName,
+                                              String stem,
+                                              String optionA,
+                                              String optionB,
+                                              String optionC,
+                                              String optionD,
+                                              String correct) throws Exception {
+    try (Workbook workbook = new XSSFWorkbook();
+         ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+        Sheet sheet = workbook.createSheet("Questions");
+
+        Row header = sheet.createRow(0);
+        String[] headers = {
+                "Stack_Name", "Topic_Name", "Difficulty", "Question_Type", "Question_Stem",
+                "Option_A", "Option_B", "Option_C", "Option_D", "Option_E", "Option_F", "Correct_Answer"
+        };
+        for (int i = 0; i < headers.length; i++) {
+            header.createCell(i).setCellValue(headers[i]);
+        }
+
+        Row row = sheet.createRow(1);
+        row.createCell(0).setCellValue(stackName);
+        row.createCell(1).setCellValue(topic.getTopicName());
+        row.createCell(2).setCellValue("Easy");
+        row.createCell(3).setCellValue("MCQ");
+        row.createCell(4).setCellValue(stem);
+        row.createCell(5).setCellValue(optionA);
+        row.createCell(6).setCellValue(optionB);
+        row.createCell(7).setCellValue(optionC);
+        row.createCell(8).setCellValue(optionD);
+        row.createCell(9).setCellValue("");
+        row.createCell(10).setCellValue("");
+        row.createCell(11).setCellValue(correct);
+
+        workbook.write(out);
+        return new MockMultipartFile(
+                "file",
+                "mcq-bulk.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                out.toByteArray());
+    }
 }
 }

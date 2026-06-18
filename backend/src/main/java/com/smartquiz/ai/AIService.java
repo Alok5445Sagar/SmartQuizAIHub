@@ -14,11 +14,14 @@ import java.util.Collection;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.time.Duration;
+import java.nio.charset.StandardCharsets;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.ai.azure.openai.AzureOpenAiChatOptions;
+import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -28,6 +31,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.json.JsonReadFeature;
+import com.smartquiz.dto.ChatRequest;
 import com.smartquiz.dto.MCQDTO;
 import com.smartquiz.dto.SimilarityCheckResponse;
 import com.smartquiz.entity.MCQ;
@@ -53,14 +57,20 @@ public class AIService {
             "java", "spring", "boot", "python", "javascript", "typescript", "react", "node", "sql", "api"
         ));
 
-    // @Value("${app.ai.api-key}")
-    // private String apiKey;
+    @Value("${app.ai.api-key:}")
+    private String apiKey;
 
     @Value("${app.ai.api-url}")
     private String apiUrl;
 
     @Value("${app.ai.model}")
     private String model;
+
+    @Value("${app.ai.provider:azure-openai}")
+    private String aiProvider;
+
+    @Value("${app.ai.openai-compatible.chat-path:/chat/completions}")
+    private String openAiCompatibleChatPath;
 
     @Value("${app.ai.similarity-threshold:0.70}")
     private double similarityThreshold;
@@ -80,22 +90,42 @@ public class AIService {
     @Value("${app.ai.max-output-tokens:1200}")
     private int maxOutputTokens;
 
+    @Value("${app.ai.fallback-model:}")
+    private String fallbackModel;
+
+    @Value("${app.ai.retry.max-attempts:4}")
+    private int retryMaxAttempts;
+
+    @Value("${app.ai.retry.initial-backoff-ms:600}")
+    private long retryInitialBackoffMs;
+
+    @Value("${app.ai.max-request-bytes:30000}")
+    private int maxRequestBytes;
+
     @Autowired
     private MCQRepository mcqRepository;
 
     @Autowired
     private ObjectMapper objectMapper;
 
+    private final ChatClient.Builder chatClientBuilder;
+    private ChatClient chatClient;
+    private WebClient webClient;
+
     private ObjectMapper lenientObjectMapper;
 
-    private WebClient webClient;
+    @Autowired
+    public AIService(ChatClient.Builder chatClientBuilder) {
+        this.chatClientBuilder = chatClientBuilder;
+    }
 
     @jakarta.annotation.PostConstruct
     public void init() {
+        this.chatClient = chatClientBuilder.build();
         this.webClient = WebClient.builder()
-                .codecs(configurer -> configurer.defaultCodecs()
-                        .maxInMemorySize(10 * 1024 * 1024))
-                .build();
+            .codecs(configurer -> configurer.defaultCodecs()
+                .maxInMemorySize(10 * 1024 * 1024))
+            .build();
 
         this.lenientObjectMapper = objectMapper.copy()
             .configure(JsonReadFeature.ALLOW_SINGLE_QUOTES.mappedFeature(), true)
@@ -109,20 +139,41 @@ public class AIService {
     public List<MCQDTO.CreateRequest> generateQuestions(
             TechnologyStack stack, Topic topic, String difficulty, int count,
             Long creatorStackId, Long creatorTopicId) {
+        return generateQuestions(
+                stack,
+                topic,
+                difficulty,
+                count,
+                creatorStackId,
+                creatorTopicId,
+                "MCQ",
+                Collections.emptyList());
+    }
+
+    public List<MCQDTO.CreateRequest> generateQuestions(
+            TechnologyStack stack, Topic topic, String difficulty, int count,
+            Long creatorStackId, Long creatorTopicId,
+            String questionType,
+            List<MCQDTO.CreateRequest> alreadyAcceptedInRequest) {
+
+        String normalizedQuestionType = normalizeQuestionType(questionType);
 
         List<String> existingStems = getExistingStemsForPrompt(stack.getStackId(), topic.getTopicId(), 30);
+        List<String> requestAvoidStems = buildRetryAvoidStems(existingStems, alreadyAcceptedInRequest, 120);
 
         String prompt = buildGenerationPrompt(
-            stack.getStackName(), topic.getTopicName(), difficulty, count, existingStems);
-        String rawResponse = callOllamaAPI(prompt);
+            stack.getStackName(), topic.getTopicName(), difficulty, count, requestAvoidStems, normalizedQuestionType);
+        String rawResponse = callAzureOpenAIAPI(prompt);
 
         List<MCQDTO.CreateRequest> generated = parseGeneratedQuestions(
-                rawResponse, stack.getStackId(), topic.getTopicId(), difficulty);
+                rawResponse, stack.getStackId(), topic.getTopicId(), difficulty, normalizedQuestionType);
 
         Collection<MCQ.Status> generationStatuses = List.of(
+            MCQ.Status.DRAFT,
             MCQ.Status.READY_FOR_REVIEW,
             MCQ.Status.UNDER_REVIEW,
-            MCQ.Status.APPROVED);
+            MCQ.Status.APPROVED,
+            MCQ.Status.REJECTED);
         List<MCQ> existingForGeneration = mcqRepository.findNonDraftByStackAndTopic(
             stack.getStackId(), topic.getTopicId(), null, generationStatuses);
 
@@ -137,7 +188,9 @@ public class AIService {
                     req.getOptionC(), req.getOptionD(), null, null,
                     existingForGeneration);
 
-            if (!check.isHasSimilar() && !hasSimilarInBatch(req, screened)) {
+            if (!check.isHasSimilar()
+                    && !hasSimilarInBatch(req, screened)
+                    && !hasSimilarInBatch(req, alreadyAcceptedInRequest)) {
                 screened.add(req);
             } else {
                 log.info("Generated question screened out due to similarity ≥30%. Requesting replacement.");
@@ -149,13 +202,14 @@ public class AIService {
             attempts++;
             int stillNeeded = count - screened.size();
             if (stillNeeded > 0) {
-                List<String> retryAvoidStems = buildRetryAvoidStems(existingStems, screened, 80);
+                List<MCQDTO.CreateRequest> avoidCandidates = mergeAccepted(screened, alreadyAcceptedInRequest);
+                List<String> retryAvoidStems = buildRetryAvoidStems(existingStems, avoidCandidates, 80);
                 int retryRequestCount = Math.min(stillNeeded + Math.max(1, stillNeeded), 20);
                 String retryPrompt = buildGenerationPrompt(
-                    stack.getStackName(), topic.getTopicName(), difficulty, retryRequestCount, retryAvoidStems);
-                String retryResponse = callOllamaAPI(retryPrompt);
+                    stack.getStackName(), topic.getTopicName(), difficulty, retryRequestCount, retryAvoidStems, normalizedQuestionType);
+                String retryResponse = callAzureOpenAIAPI(retryPrompt);
                 List<MCQDTO.CreateRequest> retryGenerated = parseGeneratedQuestions(
-                        retryResponse, stack.getStackId(), topic.getTopicId(), difficulty);
+                        retryResponse, stack.getStackId(), topic.getTopicId(), difficulty, normalizedQuestionType);
 
                 for (MCQDTO.CreateRequest req : retryGenerated) {
                     if (screened.size() >= count) break;
@@ -163,7 +217,9 @@ public class AIService {
                             req.getQuestionStem(), req.getOptionA(), req.getOptionB(),
                             req.getOptionC(), req.getOptionD(), null, null,
                             existingForGeneration);
-                    if (!check.isHasSimilar() && !hasSimilarInBatch(req, screened)) {
+                    if (!check.isHasSimilar()
+                            && !hasSimilarInBatch(req, screened)
+                            && !hasSimilarInBatch(req, alreadyAcceptedInRequest)) {
                         screened.add(req);
                     } else {
                         log.info("Retry-generated question screened out due to similarity with existing or in-batch questions.");
@@ -177,19 +233,22 @@ public class AIService {
         int maxSingleFillAttempts = Math.max(6, count * 5);
         while (screened.size() < count && singleFillAttempts < maxSingleFillAttempts) {
             singleFillAttempts++;
-            List<String> singleAvoidStems = buildRetryAvoidStems(existingStems, screened, 120);
+            List<MCQDTO.CreateRequest> avoidCandidates = mergeAccepted(screened, alreadyAcceptedInRequest);
+            List<String> singleAvoidStems = buildRetryAvoidStems(existingStems, avoidCandidates, 120);
             String singlePrompt = buildGenerationPrompt(
-                    stack.getStackName(), topic.getTopicName(), difficulty, 1, singleAvoidStems);
-            String singleResponse = callOllamaAPI(singlePrompt);
+                    stack.getStackName(), topic.getTopicName(), difficulty, 1, singleAvoidStems, normalizedQuestionType);
+            String singleResponse = callAzureOpenAIAPI(singlePrompt);
             List<MCQDTO.CreateRequest> singleGenerated = parseGeneratedQuestions(
-                    singleResponse, stack.getStackId(), topic.getTopicId(), difficulty);
+                    singleResponse, stack.getStackId(), topic.getTopicId(), difficulty, normalizedQuestionType);
 
             for (MCQDTO.CreateRequest req : singleGenerated) {
                 SimilarityCheckResponse check = checkSimilarityForGeneration(
                         req.getQuestionStem(), req.getOptionA(), req.getOptionB(),
                         req.getOptionC(), req.getOptionD(), null, null,
                         existingForGeneration);
-                if (!check.isHasSimilar() && !hasSimilarInBatch(req, screened)) {
+                if (!check.isHasSimilar()
+                    && !hasSimilarInBatch(req, screened)
+                    && !hasSimilarInBatch(req, alreadyAcceptedInRequest)) {
                     screened.add(req);
                     break;
                 }
@@ -203,6 +262,198 @@ public class AIService {
         }
 
         return screened;
+    }
+
+    public String answerGeneralQuery(String question, List<ChatRequest.ChatMessage> history, String userId, String assistantRole) {
+        String sanitizedQuestion = question == null ? "" : question.trim().replaceAll("\\s+", " ");
+        if (sanitizedQuestion.isBlank()) {
+            throw new RuntimeException("Question cannot be empty.");
+        }
+
+        if (sanitizedQuestion.length() > 2000) {
+            sanitizedQuestion = sanitizedQuestion.substring(0, 2000);
+        }
+
+        String systemPrompt = buildRoleAwareSystemPrompt(assistantRole);
+
+        List<ChatRequest.ChatMessage> safeHistory = history == null ? Collections.emptyList() : history;
+        List<ChatRequest.ChatMessage> trimmedHistory = safeHistory.stream()
+                .filter(m -> m != null && !isBlank(m.getRole()) && !isBlank(m.getContent()))
+                .map(m -> new ChatRequest.ChatMessage(
+                        normalizeRole(m.getRole()),
+                        trimToLength(m.getContent(), 800)))
+                .filter(m -> "user".equals(m.getRole()) || "assistant".equals(m.getRole()))
+                .collect(Collectors.toList());
+
+        if (trimmedHistory.size() > 8) {
+            trimmedHistory = trimmedHistory.subList(trimmedHistory.size() - 8, trimmedHistory.size());
+        }
+
+        StringBuilder userPrompt = new StringBuilder();
+        if (!isBlank(userId)) {
+            userPrompt.append("User: ").append(trimToLength(userId, 120)).append("\n\n");
+        }
+
+        if (!trimmedHistory.isEmpty()) {
+            userPrompt.append("Conversation so far:\n");
+            for (ChatRequest.ChatMessage msg : trimmedHistory) {
+                userPrompt.append(msg.getRole())
+                        .append(": ")
+                        .append(msg.getContent().trim().replaceAll("\\s+", " "))
+                        .append("\n");
+            }
+            userPrompt.append("\n");
+        }
+
+        userPrompt.append("Current user query: ").append(sanitizedQuestion);
+
+        try {
+            String answer = callAssistantChat(
+                    systemPrompt,
+                    userPrompt.toString(),
+                    Math.min(700, Math.max(256, maxOutputTokens)),
+                    0.4d);
+            return stripCodeFences(trimToLength(answer, 4000));
+        } catch (RuntimeException ex) {
+            log.warn("General chat AI call failed; serving offline fallback. Reason: {}", safeSnippet(ex.getMessage()));
+            return buildOfflineFallbackAnswer(sanitizedQuestion, assistantRole);
+        }
+    }
+
+    private String buildOfflineFallbackAnswer(String question, String assistantRole) {
+        String lower = question == null ? "" : question.toLowerCase();
+        String role = assistantRole == null ? "SME" : assistantRole.trim().toUpperCase();
+
+        String topicGuidance;
+        if (containsAny(lower, "java", "jvm", "spring", "oop", "stream api", "hibernate")) {
+            topicGuidance = "Java/Spring tip: focus on core concepts first (OOP, collections, exceptions, threading), then framework layers (MVC, data, security), and finish with one practical example or mini-project.";
+        } else if (containsAny(lower, "sql", "database", "normalization", "join", "index", "transaction")) {
+            topicGuidance = "Database tip: clarify the schema, choose correct keys/indexes, and validate with sample queries. For performance, check query plan and avoid unnecessary full-table scans.";
+        } else if (containsAny(lower, "react", "javascript", "frontend", "ui", "css", "html")) {
+            topicGuidance = "Frontend tip: break UI into reusable components, keep state minimal and predictable, and optimize rendering and network calls for responsiveness.";
+        } else if (containsAny(lower, "api", "rest", "microservice", "backend", "http", "authentication")) {
+            topicGuidance = "Backend/API tip: define clear contracts, validate inputs, handle errors consistently, and secure endpoints with proper authentication/authorization.";
+        } else if (containsAny(lower, "cloud", "azure", "aws", "gcp", "docker", "kubernetes", "devops")) {
+            topicGuidance = "Cloud/DevOps tip: start with architecture boundaries, automate build/deploy pipelines, and add logging/monitoring early for easier operations.";
+        } else if (containsAny(lower, "dsa", "algorithm", "data structure", "complexity", "leetcode")) {
+            topicGuidance = "DSA tip: identify input constraints, choose the right data structure, and reason about time/space complexity before coding.";
+        } else if (containsAny(lower, "interview", "prepare", "study", "learning", "roadmap")) {
+            topicGuidance = "Preparation tip: use a weekly plan with concept revision, timed practice, and retrospective notes on mistakes and improvements.";
+        } else {
+            topicGuidance = "General tip: define the problem clearly, split it into smaller parts, evaluate options with trade-offs, and implement the simplest robust solution first.";
+        }
+
+        String roleHint = "ADMIN".equals(role)
+                ? "Admin note: if this is workflow-related, track turnaround time, review load, and quality metrics to improve decision-making."
+                : "SME note: if this is question-authoring related, keep wording precise and avoid ambiguous answer options.";
+
+        return trimToLength(
+            "[Fallback mode] Live AI is temporarily unavailable.\n\n"
+                + "I can still help with this topic using built-in guidance.\n\n"
+                        + topicGuidance + "\n\n"
+                        + roleHint + "\n\n"
+                        + "If you want, I can give a step-by-step breakdown tailored to your exact question: \""
+                        + trimToLength(question, 220) + "\".",
+                4000);
+    }
+
+    private boolean containsAny(String text, String... terms) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        for (String term : terms) {
+            if (term != null && !term.isBlank() && text.contains(term)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String buildRoleAwareSystemPrompt(String assistantRole) {
+        String role = assistantRole == null ? "SME" : assistantRole.trim().toUpperCase();
+        if ("ADMIN".equals(role)) {
+            return """
+                    You are Smart Quiz Hub Admin Assistant.
+                    Your responsibilities:
+                    - Help admins with governance, reviewer assignment strategy, and workflow bottlenecks.
+                    - Provide concise operational recommendations for quality, coverage, and approvals.
+                    - Explain trade-offs and include actionable next steps.
+
+                    Constraints:
+                    - Do not reveal secrets, credentials, tokens, or internal system configuration.
+                    - If uncertain, explicitly mention uncertainty and suggest a safe verification path.
+                    - Use clear bullet points for operational guidance.
+                    """;
+        }
+
+        return """
+                You are Smart Quiz Hub SME Assistant.
+                Your responsibilities:
+                - Help SMEs draft, improve, and review technical quiz questions.
+                - Explain concepts with practical examples and interview-oriented clarity.
+                - Keep guidance concise, accurate, and easy to apply.
+
+                Constraints:
+                - Do not reveal secrets, credentials, tokens, or internal system configuration.
+                - If uncertain, explicitly mention uncertainty and suggest a safe verification path.
+                - Prefer structured bullets or steps for readability.
+                """;
+    }
+
+    public String getActiveModelName() {
+        return isBlank(model) ? "unknown" : model;
+    }
+
+    private String normalizeRole(String role) {
+        String normalized = role == null ? "" : role.trim().toLowerCase();
+        if ("assistant".equals(normalized) || "bot".equals(normalized) || "model".equals(normalized)) {
+            return "assistant";
+        }
+        return "user";
+    }
+
+    private String trimToLength(String value, int maxLength) {
+        if (value == null) {
+            return "";
+        }
+        if (value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength);
+    }
+
+    private String callAssistantChat(String systemPrompt, String userPrompt, int maxTokens, double temperature) {
+        if (isBlank(apiKey)) {
+            throw new RuntimeException("Azure OpenAI API key is missing. Set app.ai.api-key in application.properties.");
+        }
+
+        if ("openai-compatible".equalsIgnoreCase(aiProvider)) {
+            return callOpenAiCompatibleAPI(systemPrompt, userPrompt, maxTokens, temperature);
+        }
+
+        String boundedPrompt = enforceRequestSizeLimit(userPrompt);
+        List<String> deployments = new ArrayList<>();
+        deployments.add(model);
+
+        if (!isBlank(fallbackModel) && !fallbackModel.equalsIgnoreCase(model)) {
+            deployments.add(fallbackModel);
+        }
+
+        RuntimeException lastError = null;
+        for (int i = 0; i < deployments.size(); i++) {
+            String deployment = deployments.get(i);
+            try {
+                return callAzureDeploymentWithRetry(systemPrompt, boundedPrompt, deployment, maxTokens, temperature);
+            } catch (RuntimeException ex) {
+                lastError = ex;
+                if (i < deployments.size() - 1) {
+                    log.warn("Assistant chat failed on deployment '{}'. Trying fallback deployment '{}'. Reason: {}",
+                            deployment, deployments.get(i + 1), safeSnippet(ex.getMessage()));
+                }
+            }
+        }
+
+        throw (lastError != null) ? lastError : new RuntimeException("AI service error: unknown failure");
     }
 
     private List<String> buildRetryAvoidStems(List<String> existingStems,
@@ -226,12 +477,28 @@ public class AIService {
                 .collect(Collectors.toList());
     }
 
+    private List<MCQDTO.CreateRequest> mergeAccepted(List<MCQDTO.CreateRequest> first, List<MCQDTO.CreateRequest> second) {
+        List<MCQDTO.CreateRequest> merged = new ArrayList<>();
+        if (first != null) {
+            merged.addAll(first);
+        }
+        if (second != null) {
+            merged.addAll(second);
+        }
+        return merged;
+    }
+
     private List<String> getExistingStemsForPrompt(Long stackId, Long topicId, int limit) {
         List<MCQ> existing = mcqRepository.findNonDraftByStackAndTopic(
-                stackId,
-                topicId,
-                null,
-                List.of(MCQ.Status.READY_FOR_REVIEW, MCQ.Status.UNDER_REVIEW, MCQ.Status.APPROVED));
+            stackId,
+            topicId,
+            null,
+            List.of(
+                MCQ.Status.DRAFT,
+                MCQ.Status.READY_FOR_REVIEW,
+                MCQ.Status.UNDER_REVIEW,
+                MCQ.Status.APPROVED,
+                MCQ.Status.REJECTED));
 
         return existing.stream()
                 .map(MCQ::getQuestionStem)
@@ -325,7 +592,7 @@ public class AIService {
 
         String candidate = buildQuestionText(questionStem, optionA, optionB, optionC, optionD, optionE, optionF);
         String prompt = buildSimilarityPrompt(candidate, existing);
-        String rawResponse = callOllamaAPI(prompt);
+        String rawResponse = callAzureOpenAIAPI(prompt);
         SimilarityCheckResponse aiResult = parseSimilarityResponse(rawResponse, existing);
         return aiResult.isHasSimilar() ? aiResult : deterministic;
     }
@@ -430,12 +697,44 @@ public class AIService {
     }
 
     private String buildGenerationPrompt(String stackName, String topicName,
-                                     String difficulty, int count) {
-        return buildGenerationPrompt(stackName, topicName, difficulty, count, Collections.emptyList());
-    }
+                                     String difficulty, int count, List<String> existingStems, String questionType) {
+        String normalizedType = normalizeQuestionType(questionType);
+        String answerFormatRules = "MCQ".equals(normalizedType)
+                ? "- Exactly one correct answer.\n- correctAnswer must be a single uppercase letter from A to D."
+                : "- Multiple correct answers are required.\n- At least 2 correct answers.\n- correctAnswer must be comma-separated uppercase letters (e.g., \"A,C,E\") sorted alphabetically with no duplicates.";
 
-    private String buildGenerationPrompt(String stackName, String topicName,
-                                     String difficulty, int count, List<String> existingStems) {
+        String optionRules = "MCQ".equals(normalizedType)
+                ? "- Each question must have exactly 4 options (A, B, C, D)."
+                : "- Each question must have 4 to 6 options. A-D are mandatory, E and F are optional.";
+
+        String responseExample = "MCQ".equals(normalizedType)
+                ? """
+            [
+            {
+                \"questionStem\": \"...\",
+                \"optionA\": \"...\",
+                \"optionB\": \"...\",
+                \"optionC\": \"...\",
+                \"optionD\": \"...\",
+                \"correctAnswer\": \"A\"
+            }
+            ]
+            """
+                : """
+            [
+            {
+                \"questionStem\": \"...\",
+                \"optionA\": \"...\",
+                \"optionB\": \"...\",
+                \"optionC\": \"...\",
+                \"optionD\": \"...\",
+                \"optionE\": \"...\",
+                \"optionF\": \"...\",
+                \"correctAnswer\": \"A,C\"
+            }
+            ]
+            """;
+
         String avoidSection = "";
         if (existingStems != null && !existingStems.isEmpty()) {
             StringBuilder avoid = new StringBuilder();
@@ -448,9 +747,9 @@ public class AIService {
         }
 
         return String.format("""
-            You are an expert technical trainer creating HIGH-QUALITY, CONCEPTUALLY DISTINCT, and NON-OVERLAPPING MCQ questions.
+            You are an expert technical trainer creating HIGH-QUALITY, CONCEPTUALLY DISTINCT, and NON-OVERLAPPING %s questions.
 
-            Generate EXACTLY %d unique multiple-choice questions.
+            Generate EXACTLY %d unique %s questions.
 
             Context:
             - Technology Stack: %s
@@ -491,8 +790,8 @@ public class AIService {
             - Questions are NOT distinct just because the wording is different.
 
             QUALITY RULES:
-            - Each question must have exactly 4 options (A, B, C, D).
-            - Only ONE correct answer.
+            %s
+            %s
             - Options must be plausible, clearly distinct, and non-overlapping.
             - Avoid vague, generic, or trivia-style questions.
             - Keep question styles varied.
@@ -507,41 +806,219 @@ public class AIService {
             - NO explanation
             - NO markdown
             - NO extra text
+            - Ensure JSON object keys exactly match the schema example.
 
             %s
 
 
-            [
-            {
-                "questionStem": "...",
-                "optionA": "...",
-                "optionB": "...",
-                "optionC": "...",
-                "optionD": "...",
-                "correctAnswer": "A"
-            }
-            ]
-            """, count, stackName, topicName, difficulty, avoidSection);
+            %s
+            """,
+            normalizedType,
+            count,
+            normalizedType,
+            stackName,
+            topicName,
+            difficulty,
+            optionRules,
+            answerFormatRules,
+            avoidSection,
+            responseExample);
     }
 
-    private String callOllamaAPI(String prompt) {
-        try {
-            Map<String, Object> requestBody = new HashMap<>();
-            requestBody.put("model", model);
-            requestBody.put("prompt", prompt);
-            requestBody.put("stream", false);
-            requestBody.put("format", "json");
-            requestBody.put("keep_alive", "30m");
+    private String callAzureOpenAIAPI(String prompt) {
+        if (isBlank(apiKey)) {
+            throw new RuntimeException("Azure OpenAI API key is missing. Set app.ai.api-key in application.properties.");
+        }
 
-            Map<String, Object> options = new HashMap<>();
-            options.put("temperature", 0.2);
-            options.put("top_p", 0.9);
-            options.put("num_predict", maxOutputTokens);
-            requestBody.put("options", options);
+        if ("openai-compatible".equalsIgnoreCase(aiProvider)) {
+            return callOpenAiCompatibleAPI(prompt);
+        }
+
+        String boundedPrompt = enforceRequestSizeLimit(prompt);
+        List<String> deployments = new ArrayList<>();
+        deployments.add(model);
+
+        if (!isBlank(fallbackModel) && !fallbackModel.equalsIgnoreCase(model)) {
+            deployments.add(fallbackModel);
+        }
+
+        RuntimeException lastError = null;
+        for (int i = 0; i < deployments.size(); i++) {
+            String deployment = deployments.get(i);
+            try {
+                return callAzureDeploymentWithRetry(boundedPrompt, deployment);
+            } catch (RuntimeException ex) {
+                lastError = ex;
+                if (i < deployments.size() - 1) {
+                    log.warn("AI call failed on deployment '{}'. Trying fallback deployment '{}'. Reason: {}",
+                            deployment, deployments.get(i + 1), safeSnippet(ex.getMessage()));
+                }
+            }
+        }
+
+        throw (lastError != null) ? lastError : new RuntimeException("AI service error: unknown failure");
+    }
+
+    private String callAzureDeploymentWithRetry(String prompt, String deployment) {
+        return callAzureDeploymentWithRetry(
+                "You are a quiz assistant. Follow the user's response format exactly.",
+                prompt,
+                deployment,
+                maxOutputTokens,
+                0.2d);
+    }
+
+    private String callAzureDeploymentWithRetry(
+            String systemPrompt,
+            String userPrompt,
+            String deployment,
+            int maxTokens,
+            double temperature) {
+        int maxAttempts = Math.max(1, retryMaxAttempts);
+        long backoffMs = Math.max(200L, retryInitialBackoffMs);
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                AzureOpenAiChatOptions options = AzureOpenAiChatOptions.builder()
+                        .deploymentName(deployment)
+                        .temperature(temperature)
+                        .topP(0.9)
+                        .maxTokens(maxTokens)
+                        .build();
+
+                String modelResponse = chatClient.prompt()
+                        .system(systemPrompt)
+                        .user(userPrompt)
+                        .options(options)
+                        .call()
+                        .content();
+
+                if (modelResponse == null || modelResponse.isBlank()) {
+                    throw new RuntimeException("Azure OpenAI returned an empty response payload.");
+                }
+
+                return modelResponse;
+            } catch (Exception e) {
+                RuntimeException mapped = mapAzureError(e, deployment);
+                boolean retryable = isRetryableError(mapped.getMessage());
+
+                if (!retryable || attempt == maxAttempts) {
+                    throw mapped;
+                }
+
+                log.warn("Transient AI gateway failure (attempt {}/{} on '{}'). Retrying in {} ms. Cause: {}",
+                        attempt, maxAttempts, deployment, backoffMs, safeSnippet(mapped.getMessage()));
+
+                try {
+                    Thread.sleep(backoffMs);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("AI retry interrupted while waiting for backoff.");
+                }
+
+                backoffMs = Math.min(backoffMs * 2L, 8000L);
+            }
+        }
+
+        throw new RuntimeException("AI service error: retry loop exhausted unexpectedly.");
+    }
+
+    private RuntimeException mapAzureError(Exception e, String deployment) {
+        String msg = (e.getMessage() == null) ? "" : e.getMessage().toLowerCase();
+        log.error("Azure OpenAI API call failed (deployment={}): {}", deployment, e.getMessage());
+
+        if (msg.contains("timed out") || msg.contains("timeout")) {
+            return new RuntimeException(
+                    "AI model response timed out from Azure OpenAI deployment '" + deployment
+                            + "'. Try a smaller question count, or increase app.ai.timeout-seconds.");
+        }
+
+        if (msg.contains("connection refused") || msg.contains("failed to connect") || msg.contains("no route")) {
+            return new RuntimeException("Azure OpenAI service unavailable. Verify app.ai.api-url and network connectivity.");
+        }
+
+        if (msg.contains("401") || msg.contains("403") || msg.contains("unauthorized") || msg.contains("forbidden")) {
+            return new RuntimeException("Azure OpenAI authentication failed. Verify app.ai.api-key.");
+        }
+
+        if (msg.contains("404") || (msg.contains("deployment") && msg.contains("not found"))) {
+            return new RuntimeException("Azure OpenAI deployment was not found. Verify deployment name: " + deployment + ".");
+        }
+
+        if (msg.contains("413") || msg.contains("payload too large") || msg.contains("request entity too large")) {
+            return new RuntimeException("AI request body exceeded gateway limits. Prompt was reduced; retry with fewer questions if needed.");
+        }
+
+        return new RuntimeException("AI service error: " + e.getMessage());
+    }
+
+    private boolean isRetryableError(String message) {
+        String msg = message == null ? "" : message.toLowerCase();
+        return msg.contains("429")
+                || msg.contains("too many requests")
+                || msg.contains("500")
+                || msg.contains("502")
+                || msg.contains("503")
+                || msg.contains("504")
+                || msg.contains("timed out")
+                || msg.contains("timeout")
+                || msg.contains("gateway");
+    }
+
+    private String enforceRequestSizeLimit(String prompt) {
+        if (prompt == null) {
+            return "";
+        }
+
+        int limitBytes = Math.max(4096, maxRequestBytes);
+        String bounded = prompt;
+        byte[] raw = bounded.getBytes(StandardCharsets.UTF_8);
+        if (raw.length <= limitBytes) {
+            return bounded;
+        }
+
+        String suffix = "\n\n[Truncated to respect API gateway request-size limit.]";
+        int targetChars = Math.max(512, (int) (bounded.length() * ((double) limitBytes / (double) raw.length)) - suffix.length());
+        if (targetChars > bounded.length()) {
+            targetChars = bounded.length();
+        }
+
+        bounded = bounded.substring(0, targetChars) + suffix;
+        while (bounded.getBytes(StandardCharsets.UTF_8).length > limitBytes && bounded.length() > 512) {
+            bounded = bounded.substring(0, bounded.length() - 128);
+        }
+
+        log.warn("AI prompt truncated from {} to {} bytes to satisfy API gateway limits.",
+                raw.length, bounded.getBytes(StandardCharsets.UTF_8).length);
+        return bounded;
+    }
+
+    private String callOpenAiCompatibleAPI(String prompt) {
+        return callOpenAiCompatibleAPI(
+                "You are a quiz assistant. Follow the user's response format exactly.",
+                prompt,
+                maxOutputTokens,
+                0.2d);
+    }
+
+    private String callOpenAiCompatibleAPI(String systemPrompt, String userPrompt, int maxTokens, double temperature) {
+        try {
+            String chatEndpoint = resolveOpenAiCompatibleEndpoint();
+
+            Map<String, Object> requestBody = new HashMap<>();
+            List<Map<String, String>> messages = new ArrayList<>();
+            messages.add(Map.of("role", "system", "content", systemPrompt));
+            messages.add(Map.of("role", "user", "content", userPrompt));
+            requestBody.put("model", model);
+            requestBody.put("messages", messages);
+            requestBody.put("temperature", temperature);
+            requestBody.put("top_p", 0.9);
+            requestBody.put("max_tokens", maxTokens);
 
             String response = webClient.post()
-                    .uri(apiUrl)
+                    .uri(chatEndpoint)
                     .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                    .header("api-key", apiKey)
                     .bodyValue(requestBody)
                     .retrieve()
                     .bodyToMono(String.class)
@@ -549,36 +1026,54 @@ public class AIService {
                     .block();
 
             JsonNode root = objectMapper.readTree(response);
-            if (root.hasNonNull("error") && !root.path("error").asText().isBlank()) {
-                throw new RuntimeException("Ollama error: " + root.path("error").asText());
+            String content = root.path("choices").path(0).path("message").path("content").asText("").trim();
+            if (!content.isBlank()) {
+                return content;
             }
 
-            String modelResponse = extractModelResponse(root);
-            if (modelResponse.isBlank()) {
-                throw new RuntimeException("Ollama returned an empty response payload. Raw: " + safeSnippet(response));
+            // Fallback for alternate response structures.
+            content = extractModelResponse(root);
+            if (!content.isBlank()) {
+                return content;
             }
 
-            return modelResponse;
+            throw new RuntimeException("OpenAI-compatible endpoint returned an empty response payload. Raw: " + safeSnippet(response));
         } catch (Exception e) {
             String msg = (e.getMessage() == null) ? "" : e.getMessage().toLowerCase();
-            log.error("Ollama API call failed: {}", e.getMessage());
+            log.error("OpenAI-compatible API call failed: {}", e.getMessage());
+
+            if (msg.contains("404") || msg.contains("not found") || msg.contains("model") && msg.contains("not found")) {
+                throw new RuntimeException("AI model or route was not found on APIM endpoint. Verify app.ai.api-url, app.ai.openai-compatible.chat-path, and app.ai.model.");
+            }
+
+            if (msg.contains("401") || msg.contains("403") || msg.contains("unauthorized") || msg.contains("forbidden")) {
+                throw new RuntimeException("OpenAI-compatible authentication failed. Verify app.ai.api-key.");
+            }
 
             if (msg.contains("timed out") || msg.contains("timeout")) {
-                throw new RuntimeException(
-                        "AI model response timed out. Ollama is running, but model '" + model
-                                + "' is responding too slowly. Try a smaller question count, or increase app.ai.timeout-seconds.");
-            }
-
-            if (msg.contains("connection refused") || msg.contains("failed to connect") || msg.contains("no route")) {
-                throw new RuntimeException("AI service unavailable. Make sure Ollama is running locally.");
-            }
-
-            if (msg.contains("model") && msg.contains("not found")) {
-                throw new RuntimeException("Configured AI model '" + model + "' was not found in Ollama.");
+                throw new RuntimeException("AI model response timed out. Try a smaller question count, or increase app.ai.timeout-seconds.");
             }
 
             throw new RuntimeException("AI service error: " + e.getMessage());
         }
+    }
+
+    private String resolveOpenAiCompatibleEndpoint() {
+        String base = apiUrl == null ? "" : apiUrl.trim();
+        if (base.isBlank()) {
+            throw new RuntimeException("app.ai.api-url is empty.");
+        }
+
+        String lower = base.toLowerCase();
+        if (lower.contains("/chat/completions") || lower.contains("/v1/chat/completions")) {
+            return base;
+        }
+
+        String normalizedBase = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
+        String normalizedPath = openAiCompatibleChatPath == null || openAiCompatibleChatPath.isBlank()
+                ? "/chat/completions"
+                : (openAiCompatibleChatPath.startsWith("/") ? openAiCompatibleChatPath : "/" + openAiCompatibleChatPath);
+        return normalizedBase + normalizedPath;
     }
 
     private String extractModelResponse(JsonNode root) {
@@ -622,8 +1117,8 @@ public class AIService {
             }
         }
 
-        // qwen3.x on Ollama may place the useful output in `thinking`
-        // while `response` is empty.
+        // Some model runtimes may place useful output in 'thinking'
+        // while 'response' is empty.
         JsonNode thinkingNode = root.path("thinking");
         if (!thinkingNode.isMissingNode() && !thinkingNode.isNull()) {
             if (thinkingNode.isTextual()) {
@@ -641,13 +1136,14 @@ public class AIService {
     }
 
     private List<MCQDTO.CreateRequest> parseGeneratedQuestions(
-            String rawJson, Long stackId, Long topicId, String difficulty) {
+            String rawJson, Long stackId, Long topicId, String difficulty, String questionType) {
+        String normalizedQuestionType = normalizeQuestionType(questionType);
         try {
             JsonNode arr;
             try {
                 arr = parseQuestionArrayNode(rawJson);
             } catch (Exception primaryParseError) {
-                List<MCQDTO.CreateRequest> fallback = parseLooseTextQuestions(rawJson, stackId, topicId, difficulty);
+                List<MCQDTO.CreateRequest> fallback = parseLooseTextQuestions(rawJson, stackId, topicId, difficulty, normalizedQuestionType);
                 if (!fallback.isEmpty()) {
                     log.warn("Used loose-text fallback parser for AI response.");
                     return fallback;
@@ -657,7 +1153,7 @@ public class AIService {
             List<MCQDTO.CreateRequest> results = new ArrayList<>();
 
             for (JsonNode node : arr) {
-                MCQDTO.CreateRequest req = toCreateRequest(node, stackId, topicId, difficulty);
+                MCQDTO.CreateRequest req = toCreateRequest(node, stackId, topicId, difficulty, normalizedQuestionType);
                 if (req != null) {
                     results.add(req);
                 }
@@ -677,7 +1173,10 @@ public class AIService {
     }
 
     private List<MCQDTO.CreateRequest> parseLooseTextQuestions(
-            String rawText, Long stackId, Long topicId, String difficulty) {
+            String rawText, Long stackId, Long topicId, String difficulty, String questionType) {
+
+        String normalizedQuestionType = normalizeQuestionType(questionType);
+        boolean isMsq = "MSQ".equals(normalizedQuestionType);
 
         List<MCQDTO.CreateRequest> results = new ArrayList<>();
         String cleaned = preprocessModelOutput(rawText);
@@ -691,7 +1190,7 @@ public class AIService {
         String currentAnswer = null;
 
         Pattern questionStart = Pattern.compile("^\\s*(?:\\d+[\\).:-]\\s*|Q(?:uestion)?\\s*\\d*\\s*[:).-]?\\s*)(.+)$", Pattern.CASE_INSENSITIVE);
-        Pattern answerLine = Pattern.compile("^\\s*(?:correct\\s*answer|answer)\\s*[:=-]\\s*([A-F1-6])\\b", Pattern.CASE_INSENSITIVE);
+        Pattern answerLine = Pattern.compile("^\\s*(?:correct\\s*answer|answer)\\s*[:=-]\\s*([A-F1-6,\\s]+)\\b", Pattern.CASE_INSENSITIVE);
 
         for (String line : lines) {
             if (line == null || line.isBlank()) {
@@ -709,14 +1208,16 @@ public class AIService {
                     req.setStackId(stackId);
                     req.setTopicId(topicId);
                     req.setDifficulty(difficulty);
-                    req.setQuestionType("MCQ");
+                    req.setQuestionType(normalizedQuestionType);
                     req.setOptionA(currentA.trim());
                     req.setOptionB(currentB.trim());
                     req.setOptionC(currentC.trim());
                     req.setOptionD(currentD.trim());
-                    req.setCorrectAnswer(extractAnswerLetter(firstNonBlank(currentAnswer, "A")));
+                    req.setCorrectAnswer(formatCorrectAnswer(firstNonBlank(currentAnswer, "A"), isMsq));
                     req.setSendForReview(false);
-                    results.add(req);
+                    if (isValidCorrectAnswer(req, isMsq)) {
+                        results.add(req);
+                    }
                 }
 
                 currentStem = qMatcher.group(1).trim();
@@ -749,14 +1250,16 @@ public class AIService {
             req.setStackId(stackId);
             req.setTopicId(topicId);
             req.setDifficulty(difficulty);
-            req.setQuestionType("MCQ");
+            req.setQuestionType(normalizedQuestionType);
             req.setOptionA(currentA.trim());
             req.setOptionB(currentB.trim());
             req.setOptionC(currentC.trim());
             req.setOptionD(currentD.trim());
-            req.setCorrectAnswer(extractAnswerLetter(firstNonBlank(currentAnswer, "A")));
+            req.setCorrectAnswer(formatCorrectAnswer(firstNonBlank(currentAnswer, "A"), isMsq));
             req.setSendForReview(false);
-            results.add(req);
+            if (isValidCorrectAnswer(req, isMsq)) {
+                results.add(req);
+            }
         }
 
         if (!results.isEmpty()) {
@@ -789,14 +1292,16 @@ public class AIService {
         req.setStackId(stackId);
         req.setTopicId(topicId);
         req.setDifficulty(difficulty);
-        req.setQuestionType("MCQ");
+        req.setQuestionType(normalizedQuestionType);
         req.setOptionA(optionA.trim());
         req.setOptionB(optionB.trim());
         req.setOptionC(optionC.trim());
         req.setOptionD(optionD.trim());
-        req.setCorrectAnswer(extractAnswerLetter(rawAnswer));
+        req.setCorrectAnswer(formatCorrectAnswer(rawAnswer, isMsq));
         req.setSendForReview(false);
-        results.add(req);
+        if (isValidCorrectAnswer(req, isMsq)) {
+            results.add(req);
+        }
 
         return results;
     }
@@ -956,7 +1461,9 @@ public class AIService {
         return hasStem && hasOptions;
     }
 
-    private MCQDTO.CreateRequest toCreateRequest(JsonNode node, Long stackId, Long topicId, String difficulty) {
+    private MCQDTO.CreateRequest toCreateRequest(JsonNode node, Long stackId, Long topicId, String difficulty, String questionType) {
+        String normalizedQuestionType = normalizeQuestionType(questionType);
+        boolean isMsq = "MSQ".equals(normalizedQuestionType);
         String stem = firstNonBlank(
                 node.path("questionStem").asText(null),
                 node.path("question").asText(null),
@@ -998,19 +1505,24 @@ public class AIService {
             node.path("correct_option").asText(null),
                 "A");
 
+        String optionE = firstNonBlank(node.path("optionE").asText(null), node.path("E").asText(null));
+        String optionF = firstNonBlank(node.path("optionF").asText(null), node.path("F").asText(null));
+
         MCQDTO.CreateRequest req = new MCQDTO.CreateRequest();
         req.setQuestionStem(stem.trim());
         req.setStackId(stackId);
         req.setTopicId(topicId);
         req.setDifficulty(difficulty);
-        req.setQuestionType("MCQ");
+        req.setQuestionType(normalizedQuestionType);
         req.setOptionA(optionA.trim());
         req.setOptionB(optionB.trim());
         req.setOptionC(optionC.trim());
         req.setOptionD(optionD.trim());
-        req.setCorrectAnswer(extractAnswerLetter(rawAnswer));
+        req.setOptionE(isBlank(optionE) ? null : optionE.trim());
+        req.setOptionF(isBlank(optionF) ? null : optionF.trim());
+        req.setCorrectAnswer(formatCorrectAnswer(rawAnswer, isMsq));
         req.setSendForReview(false);
-        return req;
+        return isValidCorrectAnswer(req, isMsq) ? req : null;
     }
 
     private String stripCodeFences(String text) {
@@ -1101,6 +1613,13 @@ public class AIService {
         return "";
     }
 
+    private String normalizeQuestionType(String questionType) {
+        if (questionType == null) {
+            return "MCQ";
+        }
+        return "MSQ".equalsIgnoreCase(questionType.trim()) ? "MSQ" : "MCQ";
+    }
+
     private boolean isBlank(String value) {
         return value == null || value.isBlank();
     }
@@ -1123,6 +1642,65 @@ public class AIService {
         return "A";
     }
 
+    private String formatCorrectAnswer(String rawAnswer, boolean isMsq) {
+        if (!isMsq) {
+            return extractAnswerLetter(rawAnswer);
+        }
+
+        List<String> letters = extractAnswerLetters(rawAnswer);
+        if (letters.isEmpty()) {
+            return "A,C";
+        }
+        return String.join(",", letters);
+    }
+
+    private List<String> extractAnswerLetters(String rawAnswer) {
+        if (isBlank(rawAnswer)) {
+            return Collections.emptyList();
+        }
+
+        Set<String> allowed = Set.of("A", "B", "C", "D", "E", "F");
+        Set<String> ordered = new HashSet<>();
+        Matcher m = Pattern.compile("[A-F1-6]", Pattern.CASE_INSENSITIVE).matcher(rawAnswer);
+        while (m.find()) {
+            String token = m.group().toUpperCase();
+            if (token.matches("[1-6]")) {
+                int idx = Integer.parseInt(token);
+                token = String.valueOf((char) ('A' + idx - 1));
+            }
+            if (allowed.contains(token)) {
+                ordered.add(token);
+            }
+        }
+
+        return ALL_OPTION_KEYS.stream()
+                .filter(ordered::contains)
+                .collect(Collectors.toList());
+    }
+
+    private boolean isValidCorrectAnswer(MCQDTO.CreateRequest req, boolean isMsq) {
+        List<String> letters = extractAnswerLetters(req.getCorrectAnswer());
+        if (!isMsq) {
+            return letters.size() == 1 && List.of("A", "B", "C", "D").contains(letters.get(0));
+        }
+
+        if (letters.size() < 2) {
+            return false;
+        }
+
+        Set<String> available = new HashSet<>();
+        if (!isBlank(req.getOptionA())) available.add("A");
+        if (!isBlank(req.getOptionB())) available.add("B");
+        if (!isBlank(req.getOptionC())) available.add("C");
+        if (!isBlank(req.getOptionD())) available.add("D");
+        if (!isBlank(req.getOptionE())) available.add("E");
+        if (!isBlank(req.getOptionF())) available.add("F");
+
+        return letters.stream().allMatch(available::contains);
+    }
+
+    private static final List<String> ALL_OPTION_KEYS = List.of("A", "B", "C", "D", "E", "F");
+
     private String safeSnippet(String text) {
         if (text == null) {
             return "<null>";
@@ -1138,13 +1716,17 @@ public class AIService {
             String optionC, String optionD, String optionE, String optionF,
             Long stackId, Long topicId, Long excludeQuestionId) {
 
-        // Fetch all existing questions in same stack + topic
-        // Fetch only non-DRAFT questions in same stack + topic
-        // DRAFT questions are excluded so AI-generated drafts don't flag each other
+        // Fetch all existing questions in same stack + topic across statuses.
         List<MCQ> existing = mcqRepository.findNonDraftByStackAndTopic(
-    stackId, topicId, excludeQuestionId,
-            List.of(MCQ.Status.READY_FOR_REVIEW, MCQ.Status.UNDER_REVIEW, MCQ.Status.APPROVED, MCQ.Status.REJECTED)
-);
+            stackId,
+            topicId,
+            excludeQuestionId,
+            List.of(
+                MCQ.Status.DRAFT,
+                MCQ.Status.READY_FOR_REVIEW,
+                MCQ.Status.UNDER_REVIEW,
+                MCQ.Status.APPROVED,
+                MCQ.Status.REJECTED));
 
         if (existing.isEmpty()) {
             return new SimilarityCheckResponse(false, Collections.emptyList());
@@ -1161,7 +1743,7 @@ public class AIService {
 
         // Build prompt for similarity scoring
         String prompt = buildSimilarityPrompt(candidate, existing);
-        String rawResponse = callOllamaAPI(prompt);
+        String rawResponse = callAzureOpenAIAPI(prompt);
         SimilarityCheckResponse aiResult = parseSimilarityResponse(rawResponse, existing);
         return aiResult.isHasSimilar() ? aiResult : deterministic;
     }
