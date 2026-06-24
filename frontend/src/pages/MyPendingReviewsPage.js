@@ -1,0 +1,264 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { mcqAPI } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+import { DifficultyBadge, QuestionTypeBadge } from '../components/StatusBadge';
+import Pagination from '../components/Pagination';
+import ViewMCQModal from '../components/ViewMCQModal';
+import toast from 'react-hot-toast';
+import { useLanguage } from '../context/LanguageContext';
+
+const AUTO_REFRESH_MS = 1000;
+
+function ReviewModal({ mcq, onClose, onDone }) {
+  const { t } = useLanguage();
+  const [action, setAction] = useState('');
+  const [comments, setComments] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!action) return toast.error(t('selectApproveOrReject'));
+    if (action === 'REJECT' && !comments.trim()) return toast.error(t('commentsRequiredForRejection'));
+    setLoading(true);
+    try {
+      await mcqAPI.review(mcq.questionId, { action, comments });
+      toast.success(action === 'APPROVE' ? `✅ ${t('questionApproved')}` : `❌ ${t('questionRejected')}`);
+      onDone();
+    } catch (err) {
+      toast.error(err.response?.data?.message || t('reviewFailed'));
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ maxWidth: 600 }}>
+        <div className="modal-header">
+          <h2>{t('reviewQuestion')}</h2>
+          <button className="modal-close" onClick={onClose}>×</button>
+        </div>
+        <div className="modal-body">
+          {/* Question preview */}
+          <div style={{ background: 'var(--bg)', borderRadius: 10, padding: 16, marginBottom: 20 }}>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+              <span style={{ fontSize: 12, background: '#ede9ff', color: '#5b21b6', padding: '2px 8px', borderRadius: 4, fontWeight: 600 }}>{mcq.stackName}</span>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{mcq.topicName}</span>
+              <DifficultyBadge difficulty={mcq.difficulty} />
+            </div>
+            <p style={{ fontSize: 14, lineHeight: 1.6, marginBottom: 12 }}>{mcq.questionStem}</p>
+            <div className="options-grid">
+                {['A','B','C','D','E','F'].map(opt => {
+                  const optValue = mcq[`option${opt}`];
+                  if (!optValue) return null;
+                  const correctAnswers = mcq.correctAnswer
+                    ? mcq.correctAnswer.split(',').map(s => s.trim())
+                    : [];
+                  const isCorrect = correctAnswers.includes(opt);
+                  return (
+                    <div key={opt} className={`option-item ${isCorrect ? 'correct' : ''}`}>
+                      <span className="option-label">{opt}</span>
+                      <span style={{ fontSize: 12 }}>{optValue}</span>
+                      {isCorrect && <span style={{ marginLeft: 'auto' }}>✓</span>}
+                    </div>
+                  );
+                })}
+              </div>
+              {mcq.questionType === 'MSQ' && (
+                <p style={{ fontSize: 11, color: 'var(--success)', marginTop: 6 }}>
+                  ✓ Correct answers: {mcq.correctAnswer}
+                </p>
+              )}
+          </div>
+
+          {/* Action */}
+          <div className="form-group">
+            <label className="form-label">{t('decision')} *</label>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                className={`btn ${action === 'APPROVE' ? 'btn-success' : 'btn-secondary'}`}
+                style={{ flex: 1, justifyContent: 'center' }}
+                onClick={() => setAction('APPROVE')}
+              >
+                ✅ {t('approve')}
+              </button>
+              <button
+                className={`btn ${action === 'REJECT' ? 'btn-danger' : 'btn-secondary'}`}
+                style={{ flex: 1, justifyContent: 'center' }}
+                onClick={() => setAction('REJECT')}
+              >
+                ❌ {t('reject')}
+              </button>
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">
+              {t('feedbackComments')} {action === 'REJECT' && <span style={{ color: 'var(--danger)' }}>*</span>}
+            </label>
+            <textarea
+              className="form-textarea"
+              rows={3}
+              placeholder={action === 'REJECT' ? t('rejectionReasonMandatory') : t('optionalFeedbackForCreator')}
+              value={comments}
+              onChange={e => setComments(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>{t('cancel')}</button>
+          <button className="btn btn-primary" onClick={handleSubmit} disabled={loading || !action}>
+            {loading ? <><span className="spinner" /> {t('submitting')}</> : t('submitReview')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function MyPendingReviewsPage() {
+  const { t, language } = useLanguage();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
+  const [data, setData] = useState(null);
+  const [page, setPage] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [viewMCQ, setViewMCQ] = useState(null);
+  const [reviewMCQ, setReviewMCQ] = useState(null);
+  const shouldAutoRefresh = user?.role === 'ADMIN' || user?.role === 'SME';
+
+  const fetchData = useCallback(async ({ background = false } = {}) => {
+    if (!background) {
+      setLoading(true);
+    }
+    try {
+      const res = await mcqAPI.getMyPendingReviews(page, 10);
+      setData(res.data);
+    } finally {
+      if (!background) {
+        setLoading(false);
+      }
+    }
+  }, [page, language]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    if (!shouldAutoRefresh) return;
+
+    const refreshNow = () => {
+      if (document.visibilityState === 'hidden') return;
+      fetchData({ background: true });
+    };
+
+    const intervalId = setInterval(() => {
+      refreshNow();
+    }, AUTO_REFRESH_MS);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        refreshNow();
+      }
+    };
+
+    window.addEventListener('focus', refreshNow);
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearInterval(intervalId);
+      window.removeEventListener('focus', refreshNow);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [shouldAutoRefresh, fetchData]);
+
+  const handleReviewDone = () => {
+    setReviewMCQ(null);
+    fetchData();
+  };
+
+  return (
+    <div>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">{t('myPendingReviewsTitle')}</h1>
+          <p className="page-subtitle">{t('myPendingReviewsSubtitle')}</p>
+        </div>
+        {data && (
+          <div style={{ background: 'var(--warning-light)', color: '#92400e', padding: '6px 14px', borderRadius: 100, fontSize: 13, fontWeight: 600 }}>
+            🔍 {data.totalElements} {t('pending')}
+          </div>
+        )}
+      </div>
+
+      <div className="card" style={{ padding: 0 }}>
+        {loading ? (
+          <div className="loading-container"><div className="spinner spinner-dark" /></div>
+        ) : !data?.content?.length ? (
+          <div className="empty-state">
+            <div className="empty-icon">🎉</div>
+            <h3>{t('noPendingReviews')}</h3>
+            <p>{t('youAreAllCaughtUpNoReviews')}</p>
+          </div>
+        ) : (
+          <>
+            <div className="table-wrapper mobile-cards">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>{t('type')}</th>
+                    <th>{t('question')}</th>
+                    <th>{t('stack')}</th>
+                    <th>{t('topic')}</th>
+                    <th>{t('difficulty')}</th>
+                    {isAdmin && <th>{t('creator')}</th>}
+                    <th>{t('status')}</th>
+                    <th>{t('actions')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.content.map((mcq, idx) => (
+                    <tr key={mcq.questionId}>
+                      <td data-label="#" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+                        {page * 10 + idx + 1}
+                      </td>
+                      <td data-label={t('type')}><QuestionTypeBadge type={mcq.questionType} aiGenerated={mcq.aiGenerated} bulkUploaded={mcq.bulkUploaded} /></td>
+                      <td data-label={t('question')}>
+                        <div className="truncate" style={{ maxWidth: 260 }} title={mcq.questionStem}>
+                          {mcq.questionStem}
+                        </div>
+                      </td>
+                      <td data-label={t('stack')}><span style={{ fontSize: 12, background: '#ede9ff', color: '#5b21b6', padding: '2px 8px', borderRadius: 4 }}>{mcq.stackName}</span></td>
+                      <td data-label={t('topic')} style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{mcq.topicName}</td>
+                      <td data-label={t('difficulty')}><DifficultyBadge difficulty={mcq.difficulty} /></td>
+                      {isAdmin && <td data-label={t('creator')} style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>{mcq.creatorEnterpriseId}</td>}
+                      <td data-label={t('status')}>
+                        <span className="badge badge-pending">🔍 {t('pending')}</span>
+                      </td>
+                      <td data-label={t('actions')}>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button className="btn btn-ghost btn-sm" onClick={() => setViewMCQ(mcq)}>
+                            👁 {t('viewFullQuestion')}
+                          </button>
+                          <button className="btn btn-primary btn-sm" onClick={() => setReviewMCQ(mcq)}>
+                            📝 {t('review')}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                {t('showing')} {data.content.length} {t('of')} {data.totalElements} {t('reviews')}
+              </span>
+              <Pagination page={page} totalPages={data.totalPages} onPageChange={setPage} />
+            </div>
+          </>
+        )}
+      </div>
+
+      {viewMCQ && <ViewMCQModal mcq={viewMCQ} onClose={() => setViewMCQ(null)} />}
+      {reviewMCQ && <ReviewModal mcq={reviewMCQ} onClose={() => setReviewMCQ(null)} onDone={handleReviewDone} />}
+    </div>
+  );
+}

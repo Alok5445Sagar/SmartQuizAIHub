@@ -1,0 +1,11 @@
+{
+  "name": "smart-quiz-ai-hub-root",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "start": "npm --prefix frontend start",
+    "build": "npm --prefix frontend run build",
+    "test": "npm --prefix frontend test",
+    "install:frontend": "npm --prefix frontend install"
+  }
+}
