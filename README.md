@@ -2,15 +2,17 @@
 
 <div align="center">
 
-![Smart Quiz AI Hub](https://img.shields.io/badge/Smart%20Quiz-AI%20Hub-6c63ff?style=for-the-badge&logo=brain)
+![Smart Quiz - AI Hub](https://img.shields.io/badge/Smart%20Quiz-AI%20Hub-6c63ff?style=for-the-badge&logo=brain)
 ![Java](https://img.shields.io/badge/Java-17-orange?style=for-the-badge&logo=openjdk)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2.5-brightgreen?style=for-the-badge&logo=springboot)
+![Spring AI](https://img.shields.io/badge/Spring%20AI-1.0.0-blue?style=for-the-badge&logo=spring)
 ![React](https://img.shields.io/badge/React-18-blue?style=for-the-badge&logo=react)
 ![MySQL](https://img.shields.io/badge/MySQL-8.0-blue?style=for-the-badge&logo=mysql)
+![Azure OpenAI](https://img.shields.io/badge/Azure%20OpenAI-GPT%204.1%20Mini-0078d4?style=for-the-badge&logo=microsoft)
 
-**A centralized, AI-powered question management platform for Subject Matter Experts and Admins**
+**A centralized, enterprise-grade AI-powered assessment platform for Subject Matter Experts (SMEs), Admins, and Participants.**
 
-[Features](#-features) • [Tech Stack](#-tech-stack) • [Getting Started](#-getting-started) • [API Docs](#-api-endpoints) • [Screenshots](#-screenshots)
+[Overview](#-overview) • [Core Pillars](#-core-pillars) • [System Architecture](#-system-architecture) • [Role-Based Access](#-role-based-access) • [Tech Stack](#-tech-stack) • [Database Schema](#-database-schema) • [API Endpoints](#-api-endpoints) • [Getting Started](#-getting-started) • [Testing](#-running-tests)
 
 </div>
 
@@ -18,418 +20,268 @@
 
 ## 📋 Overview
 
-Smart Quiz AI Hub is a full-stack web application. It streamlines the creation, review, and management of quiz questions (MCQ & MSQ) through a structured lifecycle workflow with role-based access for SMEs and Admins.
+**Smart Quiz AI Hub** is a full-stack, enterprise assessment and question-lifecycle management application. Designed for training teams, tech leads, and educational administrators, the platform streamlines the generation, translation, review, and hosting of technical quiz questions (MCQs & MSQs) via a secure role-based workflow.
+
+It leverages **Azure OpenAI (via Spring AI)** to generate unique questions, run smart semantic similarity audits, suggest translations, and act as an interactive technical assistant for content developers.
 
 ---
 
-## ✨ Features
+## ✨ Core Pillars & Features
 
-### 👤 Role-Based Access
-| Feature | SME | Admin |
-|---|---|---|
-| Create questions (MCQ & MSQ) | ✅ | ✅ |
-| Bulk upload via Excel | ✅ | ✅ |
-| Edit own DRAFT / REJECTED questions | ✅ | ✅ |
-| Edit any non-DRAFT question | ❌ | ✅ |
-| Review assigned questions | ✅ | ✅ |
-| Assign reviewers | ❌ | ✅ |
-| View Question Bank (all questions) | ❌ | ✅ |
+### 1. 🤖 AI-Powered Question Authoring & Screening
+* **AI Generation**: Generate batches of Single-Answer (MCQ) or Multiple-Answer (MSQ) questions customized by **Technology Stack**, **Topic**, and **Difficulty** (Easy, Medium, Hard).
+* **Smart Similarity Screening**: Every AI-generated question is automatically screened against the database using a **semantic similarity filter** (threshold config default at `30%`). Questions exceeding the threshold are auto-discarded and replaced.
+* **SME & Admin Assistants**: An embedded chat assistant widget provides guidance on exam writing, technical corrections, and prompt suggestions based on user roles.
 
----
+### 2. 🌐 Multi-Lingual Localization & AI Translation
+* **Localization**: The application UI is completely localized into **English (en)**, **Spanish (es)**, **French (fr)**, and **Romanian (ro)** via custom contexts.
+* **AI Translation Suggestions**: Authors can request instant translations of question stems and options using the Azure OpenAI engine. The system automatically preserves option structures, correct answer definitions, and formatting while translating the text content.
 
-### 📝 Question Types
-- **MCQ** — Single correct answer (Options A–D)
-- **MSQ** — Multiple correct answers (Options A–F, minimum 2 correct)
+### 3. 💬 Real-Time SSE Collaboration Chat
+* **Dual Chat Systems**: Features **Team Chat** (for SMEs & Admins) and **Participant Chat** (for live support and peer messaging).
+* **Server-Sent Events (SSE)**: Built-in reactive SSE endpoint (`/api/public/quiz/participant/chat/stream`) enables instant message delivery, live typing alerts, and read receipt notifications without HTTP polling.
+* **File & Attachment Sharing**: Users can upload and share attachments (up to 10MB) directly in chat rooms with secure download controllers.
 
----
+### 4. 🔄 Question Lifecycle & Review Workflows
+* **Lifecycle Flow**: `DRAFT` ➡️ `READY_FOR_REVIEW` ➡️ `UNDER_REVIEW` ➡️ `APPROVED` / `REJECTED`.
+* **Assign Reviewers**: Admins assign submitted questions to SMEs matched with matching stack expertise (excluding the question creator).
+* **Interactive Editing**: SMEs can revise drafts or rejected questions. Admins retain full override permissions to modify any active question.
 
-### 🔄 Question Lifecycle
+### 5. 📊 Bulk Upload and Templates
+* **Excel Processing**: Upload bulk questions using a customized Excel (`.xlsx`) sheet.
+* **Row-Level Validation**: The engine imports valid rows as drafts and returns precise errors for invalid rows (e.g., duplicate stems, missing fields, incorrect correct-answer options).
+* **Direct Template Download**: Download standard templates directly from the client.
 
-DRAFT → READY_FOR_REVIEW → UNDER_REVIEW → APPROVED 
-                                        ↘ REJECTED → DRAFT (re-edit & resubmit)
-
-
-| Status | Description |
-|---|---|
-| `DRAFT` | Created but not yet submitted. Only creator can view/edit. |
-| `READY_FOR_REVIEW` | Submitted for review. Admin assigns a reviewer. |
-| `UNDER_REVIEW` | Reviewer is evaluating the question. |
-| `APPROVED` | Meets quality criteria. Added to question bank. |
-| `REJECTED` | Needs revision. Creator can edit and resubmit. |
+### 6. 🏆 Live Quizzes & Advanced Analytics
+* **Host Live Assessments**: Admins select topics, specify question type mix, auto-pick questions, and publish a live quiz link with a timer.
+* **Participant Portals**: Employees/Guests log in, complete the interactive timed exam, save responses, and view instant leaderboard results.
+* **SVG Visual Dashboards**: Rich performance dashboards showing average scores, completion rates, topic weakness heatmaps, low-success difficulty alerts, and an active student watchlist.
 
 ---
 
-### 🛡️ Duplicate Detection
-- Duplicate question stems are rejected at both single create and bulk upload
-- Case-insensitive and whitespace-normalized comparison
-- Intra-file duplicates detected during bulk upload
-- Scoped per stack + topic combination
+## 🏗 System Architecture
+
+```
+                 ┌──────────────────────────────────────────────────────────┐
+                 │                   REACT SINGLE PAGE APP                  │
+                 │                 (Vanilla CSS + Contexts)                 │
+                 └─────────────────────────────┬────────────────────────────┘
+                                               │
+                                       HTTPS / JWT / SSE
+                                               │
+                                               ▼
+                 ┌──────────────────────────────────────────────────────────┐
+                 │                SPRING BOOT SECURITY LAYER                │
+                 │           (JWT Filter, Role Auth, CORS Config)           │
+                 └─────────────────────────────┬────────────────────────────┘
+                                               │
+                                               ▼
+                 ┌──────────────────────────────────────────────────────────┐
+                 │                 SPRING BOOT REST BACKEND                 │
+                 │     (Controllers, JPA Repositories, SSE Emitters)        │
+                 └──────────────┬──────────────┬──────────────┬─────────────┘
+                                │              │              │
+                                │              │              │
+                                ▼              ▼              ▼
+                     ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+                     │    MYSQL     │   │  APACHE POI  │   │  SPRING AI   │
+                     │   DATABASE   │   │  EXCEL ENG.  │   │  AZURE GPT-4 │
+                     │ (Schema/Seed)│   │  (.xlsx File)│   │ (Translation/│
+                     │              │   │              │   │ Similarity)  │
+                     └──────────────┘   └──────────────┘   └──────────────┘
+```
 
 ---
 
-### 📊 Bulk Upload
-- Upload multiple questions via Excel file (`.xlsx`)
-- Supports both MCQ and MSQ in the same file
-- Row-level error reporting — valid rows imported, invalid rows skipped with reasons
-- Download template directly from the app
+## 👥 Role-Based Access
 
----
-
-### 🔍 Advanced Filtering
-- Filter by Stack, Topic, Difficulty, Status
-- Server-side filtering across all pages (not just current page)
-- Search by question text, stack name, or creator
-- Page retention after editing — returns to same page
+| Feature | 👑 Admin | 👤 SME | 🎓 Participant |
+| :--- | :---: | :---: | :---: |
+| **Manage Question Bank (Global View)** | ✅ | ❌ | ❌ |
+| **Assign Reviewers to Questions** | ✅ | ❌ | ❌ |
+| **Edit any non-DRAFT Question** | ✅ | ❌ | ❌ |
+| **Publish Live Quizzes / Manage Links** | ✅ | ❌ | ❌ |
+| **View Global & Student Analytics** | ✅ | ❌ | ❌ |
+| **Create MCQ/MSQ Questions (Form/Excel)** | ✅ | ✅ | ❌ |
+| **Review Assigned Questions** | ✅ | ✅ | ❌ |
+| **Use AI Assistant & Translation Widget** | ✅ | ✅ | ❌ |
+| **Chat with Team (Team Chat)** | ✅ | ✅ | ❌ |
+| **Attempt Timed Quizzes** | ❌ | ❌ | ✅ |
+| **Access Participant Portal & Revision Tips** | ❌ | ❌ | ✅ |
+| **Chat with Peers & Instructors** | ❌ | ❌ | ✅ |
 
 ---
 
 ## 🛠 Tech Stack
 
 ### Backend
-| Technology | Version | Purpose |
-|---|---|---|
-| Java | 17 | Core language |
-| Spring Boot | 3.2.5 | Application framework |
-| Spring Security | 6.x | Authentication & Authorization |
-| Spring Data JPA | 3.2.5 | Database ORM |
-| JWT (jjwt) | 0.11.5 | Stateless authentication |
-| Apache POI | 5.2.5 | Excel file processing |
-| MySQL | 8.0 | Primary database |
-| H2 | In-memory | Test database |
-| JUnit 5 | 5.x | Unit & integration testing |
-| Maven | 3.8+ | Build tool |
+* **Java 17** & **Spring Boot 3.2.5**
+* **Spring Security & JWT** (Stateless Bearer Authentication)
+* **Spring Data JPA & Hibernate**
+* **Spring AI (Azure OpenAI Integration)**
+* **Apache POI 5.2.5** (Excel read/write templates)
+* **WebFlux / WebClient** (Asynchronous operations)
+* **MySQL 8.0** & **H2** (In-Memory Database for testing)
 
 ### Frontend
-| Technology | Version | Purpose |
-|---|---|---|
-| React | 18.2 | UI framework |
-| React Router | 6.x | Client-side routing |
-| Axios | 1.6 | HTTP client |
-| react-hot-toast | 2.4 | Notifications |
-| Testing Library | 14.x | Component testing |
-| Jest | 27.x | Test runner |
+* **React 18.2** (Vite-free Create-React-App configuration)
+* **React Router Dom v6**
+* **Axios** (HTTP client with response interceptors)
+* **React Hot Toast** (Alert notifications)
+* **React Markdown & Remark GFM** (AI formatting)
+* **Prism Light / Syntax Highlighter** (Technical code block renders)
+
+---
+
+## 🗄 Database Schema
+
+The database relies on a relational architecture designed with MySQL 8.0 constraints. Below are the primary entities:
+
+### Entities & Columns
+* **`users`**: `enterprise_id` (PK), `full_name`, `password` (Plain Text for demo/dev), `role` (`SME`, `ADMIN`, `PARTICIPANT`), `active` (boolean), `preferred_language`.
+* **`technology_stacks`**: `stack_id` (PK), `stack_name` (Unique).
+* **`topics`**: `topic_id` (PK), `topic_name`, `stack_id` (FK ➡️ `technology_stacks`).
+* **`user_stack_mapping`**: `id` (PK), `enterprise_id` (FK), `stack_id` (FK).
+* **`mcqs`**: `question_id` (PK), `question_stem` (Text), `question_type` (`MCQ`, `MSQ`), `option_a` through `option_f`, `correct_answer` (Comma-separated for MSQ), `is_ai_generated`, `difficulty` (`Easy`, `Medium`, `Hard`), `stack_id` (FK), `topic_id` (FK), `creator_enterprise_id` (FK), `reviewer_enterprise_id` (FK), `status` (`DRAFT`, `READY_FOR_REVIEW`, `UNDER_REVIEW`, `APPROVED`, `REJECTED`), `reviewer_comments`, timestamps.
+* **`mcq_translations`**: `translation_id` (PK), `question_id` (FK), `language_code` (`es`, `fr`, `ro`), `question_stem`, options, `translated_by` (FK ➡️ `users`).
+* **`chat_messages`**: `chat_message_id` (PK), `enterprise_id` (FK), `session_id`, `role` (`USER`, `ASSISTANT`), `content`, `created_at`.
+* **`participant_direct_messages`**: `message_id` (PK), `sender_enterprise_id` (FK), `recipient_enterprise_id` (FK), `message_text`, `attachment_name`, `attachment_content_type`, `attachment_size_bytes`, `attachment_storage_path`.
+
+---
+
+## 📡 API Endpoints
+
+### 🔑 Authentication
+* `POST /api/auth/login` — Sign in and retrieve JWT Bearer token.
+* `GET /api/auth/me` — Retrieve context details of the signed-in user.
+
+### ❓ Question Management (SME + Admin)
+* `POST /api/mcq` — Create a single question.
+* `PUT /api/mcq/{id}` — Update an existing question.
+* `GET /api/mcq/{id}` — Get question details (localized by language code).
+* `GET /api/mcq/my-questions` — Paginated & filtered list of author's questions.
+* `GET /api/mcq/my-pending-reviews` — Review queue assigned to user.
+* `POST /api/mcq/{id}/review` — Approve/reject a question with comments.
+* `POST /api/mcq/bulk-upload` — Upload Excel files.
+* `GET /api/mcq/template` — Download the standard Excel template.
+
+### 🌍 Translation Endpoints
+* `GET /api/mcq/{id}/translations` — Get all saved translations for a question.
+* `POST /api/mcq/{id}/translations/suggest?languageCode={code}` — Generate AI translation suggestions.
+* `PUT /api/mcq/{id}/translations` — Save a translation.
+
+### 👑 Admin Utilities
+* `GET /api/admin/question-bank` — Filter and view all system questions.
+* `POST /api/admin/assign-reviewer/{id}` — Delegate reviewer assignment.
+* `PUT /api/admin/edit-question/{id}` — Admin override to modify active questions.
+* `GET /api/admin/reviewers/{stackId}` — Find eligible stack reviewers.
+
+### 🏆 Quiz Control & Analytics (Admin Only)
+* `GET /api/admin/quizzes/approved-questions` — Get approved questions matching stacks/topics.
+* `POST /api/admin/quizzes/auto-pick` — Auto-pick balanced MCQ/MSQ sets.
+* `POST /api/admin/quizzes/publish` — Create a live quiz with a code.
+* `POST /api/admin/quizzes/{quizId}/close` / `reopen` / `rehost` — Manage quiz access.
+* `GET /api/admin/quizzes/{quizId}/leaderboard/export` — Export Excel leaderboard.
+* `GET /api/admin/quizzes/participant-analytics` — SVG visual statistics data.
+
+### 🎓 Participant Portal (Public Access)
+* `GET /api/public/quiz/{quizCode}` — Fetch live quiz structure.
+* `POST /api/public/quiz/{quizCode}/participant-login` — Quiz entry credential check.
+* `POST /api/public/quiz/{quizCode}/attempt` — Submit a quiz score.
+* `GET /api/public/quiz/participant/dashboard` — History, active quizzes, and tips.
+* `GET /api/public/quiz/participant/chat/stream` — Real-time SSE chat connection.
+* `POST /api/public/quiz/participant/chat/send` — Send peer direct messages.
 
 ---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
+* **Java**: JDK 17 installed and configured (`java -version`).
+* **Maven**: Maven 3.8+ installed (`mvn -version`).
+* **MySQL**: MySQL 8.0+ server running.
+* **Node.js**: Node 18+ installed.
 
-| Tool | Version | Check Command |
-|---|---|---|
-| Java | 17+ | `java -version` |
-| Maven | 3.8+ | `mvn -version` |
-| MySQL | 8.0+ | `mysql --version` |
-| Node.js | 18+ | `node -v` |
-
----
-
-### 1. Clone the Repository
-
-```bash
-git clone https://github.com/Alok5445Sagar/SmartQuizAIHub.git
-cd SmartQuizAIHub
-```
-
----
-
-### 2. Database Setup
-
-```bash
-mysql -u root -p
-```
-
+### 1. Database Setup
+Log in to your MySQL terminal:
 ```sql
-source backend/src/main/resources/schema-and-data.sql
+CREATE DATABASE smart_quiz_hub;
+USE smart_quiz_hub;
+```
+Import the schema and seed data:
+```bash
+mysql -u root -p smart_quiz_hub < backend/src/main/resources/schema-and-data.sql
 ```
 
----
-
-### 3. Configure Database Credentials
-
-Edit `backend/src/main/resources/application.properties`:
-
+### 2. Configure Backend Credentials
+Open `backend/src/main/resources/application.properties` and edit the database username and password:
 ```properties
 spring.datasource.username=root
-spring.datasource.password=your_password
+spring.datasource.password=your_secure_password
 ```
 
----
-
-### 4. Run Backend
-
+### 3. Run Backend Server
+Navigate to the backend directory and launch:
 ```bash
 cd backend
 mvn spring-boot:run
 ```
+The backend server runs on **http://localhost:8080**.
 
-Backend starts at **http://localhost:8080**
-
----
-
-### 5. Run Frontend
-
+### 4. Run Frontend Server
+Navigate to the frontend directory, install dependencies, and run:
 ```bash
 cd frontend
 npm install
 npm start
 ```
+The client starts on **http://localhost:3000**.
 
-Frontend opens at **http://localhost:3000**
+> [!TIP]
+> **Convenience Scripts**: You can run script commands directly from the workspace root directory:
+> * Install frontend dependencies: `npm run install:frontend`
+> * Run frontend client: `npm start`
+> * Run tests: `npm test`
 
 ---
 
 ## 🔑 Demo Accounts
 
-| Role | Enterprise ID | Password |
-|---|---|---|
-| 👑 Admin | `admin` | `admin123` |
-| 👤 SME | `gaurav.a.bhola` | `password123` |
-| 👤 SME | `birendra.kumar.singh` | `password123` |
-| 👤 SME | `divya.madhanasekar` | `password123` |
-| 👤 SME | `swati.avinash.nikam` | `password123` |
-| 👤 SME | `indugu.hari.prasad` | `password123` |
+Use these credentials to log in and explore different portal modes:
 
----
-
-## 🗄️ Database Schema
-
-users
-├── enterprise_id (PK)
-├── full_name
-├── password
-├── role (SME / ADMIN)
-└── active
-technology_stacks
-├── stack_id (PK)
-└── stack_name
-topics
-├── topic_id (PK)
-├── topic_name
-└── stack_id (FK)
-user_stack_mapping
-├── id (PK)
-├── enterprise_id (FK)
-└── stack_id (FK)
-mcqs
-├── question_id (PK)
-├── question_stem
-├── question_type (MCQ / MSQ)
-├── option_a, option_b, option_c, option_d
-├── option_e, option_f (MSQ optional)
-├── correct_answer (single: "A" | multiple: "A,C,E")
-├── difficulty (Easy / Medium / Hard)
-├── stack_id (FK)
-├── topic_id (FK)
-├── creator_enterprise_id (FK)
-├── reviewer_enterprise_id (FK)
-├── status (DRAFT / READY_FOR_REVIEW / UNDER_REVIEW / APPROVED / REJECTED)
-├── reviewer_comments
-├── created_at
-└── updated_at
-
----
-
-## 📡 API Endpoints
-
-### Authentication
-| Method | Endpoint | Access | Description |
-|---|---|---|---|
-| POST | `/api/auth/login` | Public | Login and get JWT token |
-| GET | `/api/auth/me` | Auth | Get current user info |
-
-### Questions (SME + Admin)
-| Method | Endpoint | Access | Description |
-|---|---|---|---|
-| POST | `/api/mcq` | Auth | Create single question |
-| PUT | `/api/mcq/{id}` | Auth | Update question |
-| GET | `/api/mcq/{id}` | Auth | Get question by ID |
-| GET | `/api/mcq/my-questions` | Auth | Get creator's questions (paginated + filtered) |
-| GET | `/api/mcq/my-pending-reviews` | Auth | Get assigned reviews |
-| POST | `/api/mcq/{id}/review` | Auth | Approve or Reject a question |
-| POST | `/api/mcq/bulk-upload` | Auth | Upload Excel file |
-| GET | `/api/mcq/template` | Auth | Download Excel template |
-
-### Admin Only
-| Method | Endpoint | Access | Description |
-|---|---|---|---|
-| GET | `/api/admin/question-bank` | Admin | All questions (paginated + filtered) |
-| POST | `/api/admin/assign-reviewer/{id}` | Admin | Assign reviewer to question |
-| PUT | `/api/admin/edit-question/{id}` | Admin | Edit any non-DRAFT question |
-| GET | `/api/admin/reviewers/{stackId}` | Admin | Get eligible reviewers for stack |
-
-### Reference Data
-| Method | Endpoint | Access | Description |
-|---|---|---|---|
-| GET | `/api/reference/stacks` | Auth | All technology stacks |
-| GET | `/api/reference/topics/{stackId}` | Auth | Topics for a stack |
-| GET | `/api/reference/users` | Auth | All users |
+| Role | Username (Enterprise ID) | Password | Stacks Assigned |
+| :--- | :--- | :--- | :--- |
+| **👑 Admin** | `admin` | `admin123` | *All Access* |
+| **👤 SME** | `gaurav.a.bhola` | `password123` | Spring Cloud, Spring Boot, Core Java |
+| **👤 SME** | `birendra.kumar.singh` | `password123` | Spring Boot, Spring Core, Spring Cloud |
+| **👤 SME** | `divya.madhanasekar` | `password123` | Spring Core, Spring MVC & REST |
+| **👤 SME** | `swati.avinash.nikam` | `password123` | Spring MVC, Spring ORM & Data JPA |
+| **🎓 Participant** | `participant.aarav` | `password123` | *Candidate / Student* |
+| **🎓 Participant** | `participant.anaya` | `password123` | *Candidate / Student* |
 
 ---
 
 ## 🧪 Running Tests
 
-### Backend Tests
-
+### Backend JUnit Tests
+Run all unit and integration tests (uses the in-memory H2 database configuration):
 ```bash
 cd backend
-
-# Run all tests
 mvn test
-
-# Run specific test class
-mvn test -Dtest=MCQServiceTest
-mvn test -Dtest=MCQControllerTest
-mvn test -Dtest=MCQRepositoryTest
-mvn test -Dtest=JwtUtilsTest
-mvn test -Dtest=MCQLifecycleIntegrationTest
-
-# Generate HTML report
-mvn test surefire-report:report
 ```
+To run specific layers:
+* Service Tests: `mvn test -Dtest=MCQServiceTest`
+* Integration Tests: `mvn test -Dtest=MCQLifecycleIntegrationTest`
+* JWT Security: `mvn test -Dtest=JwtUtilsTest`
 
-### Frontend Tests
-
+### Frontend Jest Tests
+Run the frontend test suite:
 ```bash
 cd frontend
-
-# Run all tests
 npm test -- --watchAll=false
-
-# Run with coverage
-npm test -- --coverage --watchAll=false
-
-# Run specific test
-npm test -- StatusBadge.test.js
 ```
-
-### Test Coverage
-
-| Layer | Test File | Tests |
-|---|---|---|
-| Service | `MCQServiceTest` | 28 tests |
-| Controller | `MCQControllerTest` | 22 tests |
-| Repository | `MCQRepositoryTest` | 18 tests |
-| Security | `JwtUtilsTest` | 6 tests |
-| Integration | `MCQLifecycleIntegrationTest` | 8 tests |
-| Frontend Components | `StatusBadge.test.js`, `Pagination.test.js` | 8 tests |
-| Frontend Pages | `LoginPage.test.js` | 6 tests |
-| Frontend Services | `api.test.js` | 11 tests |
-
----
-
-## 📁 Project Structure
-
-SmartQuizAIHub/
-├── backend/
-│   ├── src/
-│   │   ├── main/java/com/smartquiz/
-│   │   │   ├── config/          # Security, CORS, DataInitializer, GlobalExceptionHandler
-│   │   │   ├── controller/      # Auth, MCQ, Admin, Reference controllers
-│   │   │   ├── dto/             # Request/Response DTOs
-│   │   │   ├── entity/          # JPA Entities (User, MCQ, Stack, Topic)
-│   │   │   ├── repository/      # Spring Data JPA Repositories
-│   │   │   ├── security/        # JWT utils, filters, UserDetailsService
-│   │   │   └── service/         # Business logic
-│   │   ├── test/                # Unit, integration, repository tests
-│   │   └── resources/
-│   │       ├── application.properties
-│   │       └── schema-and-data.sql
-│   └── pom.xml
-│
-├── frontend/
-│   ├── src/
-│   │   ├── components/          # Layout, MCQForm, StatusBadge, Pagination, ViewMCQModal
-│   │   ├── context/             # AuthContext
-│   │   ├── pages/               # Login, MyQuestions, AddQuestion, Edit, Reviews, QuestionBank
-│   │   ├── services/            # Axios API service
-│   │   └── tests/           # Component, page, service tests
-│   └── package.json
-│
-└── README.md
-
-
----
-
-## 🏗️ Architecture
-
-┌─────────────────┐         ┌──────────────────────┐        ┌─────────────┐
-│   React Frontend │ ──JWT──▶│  Spring Boot Backend  │──JPA──▶│    MySQL    │
-│   (Port 3000)   │◀────────│     (Port 8080)        │        │  Database   │
-└─────────────────┘  JSON   └──────────────────────┘        └─────────────┘
-│                            │
-│                    Spring Security
-│                    JWT Auth Filter
-│                    Role-based Access
-│
-React Router
-Axios (HTTP)
-react-hot-toast
-
----
-
-## 🔐 Security
-
-- **JWT Bearer Token** authentication — stateless, no sessions
-- **Role-based authorization** — SME and ADMIN roles
-- **NoOpPasswordEncoder** for demo (replace with BCrypt for production)
-- **CORS** configured for frontend origin
-- **Global exception handler** returns proper HTTP status codes
-
----
-
-## 📦 Bulk Upload Format
-
-Download the template from the app or use this column structure:
-
-| Column | Required | Values |
-|---|---|---|
-| Stack_Name | ✅ | Must match exactly e.g. `Spring Boot` |
-| Topic_Name | ✅ | Must match exactly e.g. `Spring Boot Starters` |
-| Difficulty | ✅ | `Easy`, `Medium`, `Hard` |
-| Question_Type | ✅ | `MCQ` or `MSQ` |
-| Question_Stem | ✅ | The question text |
-| Option_A | ✅ | Option A text |
-| Option_B | ✅ | Option B text |
-| Option_C | ✅ | Option C text |
-| Option_D | ✅ | Option D text |
-| Option_E | ❌ | Optional (MSQ only) |
-| Option_F | ❌ | Optional (MSQ only) |
-| Correct_Answer | ✅ | MCQ: `A` · MSQ: `A,C` or `A,C,E` |
-
----
-
-## 🌐 Supported Technology Stacks
-
-| Stack | Topics |
-|---|---|
-| Spring Cloud | Eureka, Feign, LoadBalancer, Resilience4J, Actuator |
-| Spring Boot | Auto-Config, Starters, Embedded Server, Profiles, Testing |
-| Spring Core | IoC, Dependency Injection, Bean Lifecycle, AOP |
-| Spring MVC & REST | Controllers, Mappings, Exception Handling, DTOs |
-| Spring ORM & Data JPA | Entities, Relationships, JPQL, Transactions |
-| Core Java | OOP, Collections, Java 8+, Streams & Lambdas |
-
----
-
-## 👥 SME Stack Assignments
-
-| SME | Assigned Stacks |
-|---|---|
-| gaurav.a.bhola | Spring Cloud, Spring Boot, Core Java |
-| birendra.kumar.singh | Spring Boot, Spring Core, Spring Cloud |
-| divya.madhanasekar | Spring Core, Spring MVC & REST |
-| swati.avinash.nikam | Spring MVC & REST, Spring ORM & Data JPA |
-| indugu.hari.prasad | Spring ORM & Data JPA, Core Java |
 
 ---
 
 ## 📄 License
-
-This project was built as part of the **Hack-N-Stack: Code the Future — Java Full Stack with AI: Learning Hackathon 2026**.
-
----
-
-<div align="center">
-Built with ❤️ 
-</div>
+This project was developed for the **Hack-N-Stack: Code the Future — Java Full Stack with AI: Learning Hackathon 2026**.
