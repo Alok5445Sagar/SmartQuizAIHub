@@ -6,7 +6,7 @@ import { quizPublicAPI } from '../services/api';
 import ChatAttachment from '../components/ChatAttachment';
 import { getAuthToken } from '../services/authSession';
 
-const CHAT_SYNC_INTERVAL_MS = 1000;
+const CHAT_SYNC_INTERVAL_MS = 3000;
 const USERS_SYNC_INTERVAL_MS = 1500;
 const MOBILE_BREAKPOINT = 900;
 const emojiSet = ['😀', '😁', '😂', '😊', '😉', '😍', '🤝', '👍', '🙌', '🔥', '🎯', '✅', '👏', '💡', '🙏', '🚀'];
@@ -373,19 +373,19 @@ export default function TeamChatPage() {
     };
   }, [canUseChat, selectedUserId]);
 
+  // Fallback only: while the live stream is connected, new messages arrive as stream events.
   useEffect(() => {
-    if (!canUseChat || !selectedUserId) return;
+    if (!canUseChat || !selectedUserId || streamConnected) return;
     const syncConversation = () => {
       if (document.visibilityState === 'hidden') return;
       loadHistory(selectedUserId, { background: true });
     };
 
-    syncConversation();
     const intervalId = setInterval(() => {
       syncConversation();
     }, CHAT_SYNC_INTERVAL_MS);
     return () => clearInterval(intervalId);
-  }, [canUseChat, selectedUserId]);
+  }, [canUseChat, selectedUserId, streamConnected]);
 
   useEffect(() => {
     const onResize = () => {

@@ -47,6 +47,15 @@ public class MCQController {
         return ResponseEntity.ok(Map.of("message", "Question deleted successfully"));
     }
 
+    @GetMapping("/my-questions/stats")
+    public ResponseEntity<Map<String, Long>> getMyQuestionStats(
+            @RequestParam(required = false) Long stackId,
+            @RequestParam(required = false) Long topicId,
+            @RequestParam(required = false) String difficulty,
+            Authentication auth) {
+        return ResponseEntity.ok(mcqService.getMyQuestionStats(auth.getName(), stackId, topicId, difficulty));
+    }
+
     @GetMapping("/my-questions")
     public ResponseEntity<Page<MCQDTO.Response>> getMyQuestions(
             @RequestParam(defaultValue = "0") @jakarta.validation.constraints.Min(0) int page,

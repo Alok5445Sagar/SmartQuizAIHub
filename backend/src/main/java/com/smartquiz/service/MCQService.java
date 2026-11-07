@@ -207,6 +207,26 @@ public class MCQService {
         return mapWithTranslations(mcqs, languageCode);
     }
 
+    /** Per-status counts of the caller's questions (one grouped query); keys are status names plus "total". */
+    public Map<String, Long> getMyQuestionStats(String enterpriseId, Long stackId, Long topicId, String difficulty) {
+        MCQ.Difficulty difficultyEnum = null;
+        if (difficulty != null && !difficulty.isBlank()) {
+            try { difficultyEnum = MCQ.Difficulty.valueOf(difficulty); } catch (Exception ignored) {}
+        }
+        Map<String, Long> stats = new LinkedHashMap<>();
+        long total = 0;
+        for (MCQ.Status s : MCQ.Status.values()) {
+            stats.put(s.name(), 0L);
+        }
+        for (Object[] row : mcqRepository.countByStatusForCreator(enterpriseId, stackId, topicId, difficultyEnum)) {
+            long count = ((Number) row[1]).longValue();
+            stats.put(((MCQ.Status) row[0]).name(), count);
+            total += count;
+        }
+        stats.put("total", total);
+        return stats;
+    }
+
     public Page<MCQDTO.Response> getMyQuestions(
         String enterpriseId, int page, int size,
         Long stackId, Long topicId, String difficulty, String status) {

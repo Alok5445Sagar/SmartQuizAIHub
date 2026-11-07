@@ -3,9 +3,9 @@ import toast from 'react-hot-toast';
 import { quizAdminAPI, quizPublicAPI, referenceAPI } from '../services/api';
 import Pagination from '../components/Pagination';
 import { useLanguage } from '../context/LanguageContext';
+import useAutoRefresh from '../hooks/useAutoRefresh';
 
 const QUESTION_TYPES = ['MCQ', 'MSQ'];
-const AUTO_REFRESH_MS = 1000;
 
 const sanitizeQuestionStem = (stem) => {
   if (!stem) return '';
@@ -527,92 +527,64 @@ export default function AdminQuizDashboardPage() {
     }
   }, [leaderboardView, selectedTopicId, participantTypeFilter]);
 
-  useEffect(() => {
-    const refreshNow = async () => {
-      if (document.visibilityState === 'hidden') return;
+  // Silent background refresh of whatever the admin is looking at; paused while the tab is hidden.
+  const refreshDashboard = async () => {
+    try {
+      const res = await quizAdminAPI.getQuizzes(quizzesPage, 10);
+      setQuizzesData(res.data);
+    } catch {
+      // Silent auto-refresh; keep current data.
+    }
 
+    try {
+      const res = await quizAdminAPI.getHostedTopicsForLeaderboard();
+      setHostedTopicOptions(res.data || []);
+    } catch {
+      // Silent auto-refresh; keep current data.
+    }
+
+    if (selectedStackIds.length || selectedTopicIds.length) {
       try {
-        const res = await quizAdminAPI.getQuizzes(quizzesPage, 10);
-        setQuizzesData(res.data);
+        const res = await quizAdminAPI.getApprovedQuestionsByFilters({
+          stackIds: selectedStackIds,
+          topicIds: selectedTopicIds,
+        });
+        const latestQuestions = res.data || [];
+        setApprovedQuestions(latestQuestions);
+        setSelectedQuestionIds((prev) => prev.filter((id) => latestQuestions.some((q) => q.questionId === id)));
       } catch {
         // Silent auto-refresh; keep current data.
       }
+    }
 
+    if (leaderboardView === 'SESSION' && leaderboardQuiz?.quizCode) {
       try {
-        const res = await quizAdminAPI.getHostedTopicsForLeaderboard();
-        setHostedTopicOptions(res.data || []);
+        const res = await quizPublicAPI.getLeaderboard(leaderboardQuiz.quizCode);
+        setLeaderboardData(res.data);
       } catch {
         // Silent auto-refresh; keep current data.
       }
+    }
 
-      if (selectedStackIds.length || selectedTopicIds.length) {
-        try {
-          const res = await quizAdminAPI.getApprovedQuestionsByFilters({
-            stackIds: selectedStackIds,
-            topicIds: selectedTopicIds,
-          });
-          const latestQuestions = res.data || [];
-          setApprovedQuestions(latestQuestions);
-          setSelectedQuestionIds((prev) => prev.filter((id) => latestQuestions.some((q) => q.questionId === id)));
-        } catch {
-          // Silent auto-refresh; keep current data.
-        }
+    if (leaderboardView === 'TOPIC' && selectedTopicId) {
+      try {
+        const res = await quizAdminAPI.getTopicLeaderboard(Number(selectedTopicId), participantTypeFilter);
+        setTopicLeaderboard(res.data);
+      } catch {
+        // Silent auto-refresh; keep current data.
       }
+    }
 
-      if (leaderboardView === 'SESSION' && leaderboardQuiz?.quizCode) {
-        try {
-          const res = await quizPublicAPI.getLeaderboard(leaderboardQuiz.quizCode);
-          setLeaderboardData(res.data);
-        } catch {
-          // Silent auto-refresh; keep current data.
-        }
+    if (leaderboardView === 'OVERALL') {
+      try {
+        const res = await quizAdminAPI.getOverallLeaderboard(participantTypeFilter);
+        setOverallLeaderboard(res.data);
+      } catch {
+        // Silent auto-refresh; keep current data.
       }
-
-      if (leaderboardView === 'TOPIC' && selectedTopicId) {
-        try {
-          const res = await quizAdminAPI.getTopicLeaderboard(Number(selectedTopicId), participantTypeFilter);
-          setTopicLeaderboard(res.data);
-        } catch {
-          // Silent auto-refresh; keep current data.
-        }
-      }
-
-      if (leaderboardView === 'OVERALL') {
-        try {
-          const res = await quizAdminAPI.getOverallLeaderboard(participantTypeFilter);
-          setOverallLeaderboard(res.data);
-        } catch {
-          // Silent auto-refresh; keep current data.
-        }
-      }
-
-    };
-
-    const intervalId = setInterval(refreshNow, AUTO_REFRESH_MS);
-
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        refreshNow();
-      }
-    };
-
-    window.addEventListener('focus', refreshNow);
-    document.addEventListener('visibilitychange', handleVisibility);
-
-    return () => {
-      clearInterval(intervalId);
-      window.removeEventListener('focus', refreshNow);
-      document.removeEventListener('visibilitychange', handleVisibility);
-    };
-  }, [
-    quizzesPage,
-    selectedStackIds,
-    selectedTopicIds,
-    leaderboardView,
-    leaderboardQuiz,
-    selectedTopicId,
-    participantTypeFilter,
-  ]);
+    }
+  };
+  useAutoRefresh(refreshDashboard);
 
   const sortableRows = useMemo(() => {
     let rows = [];

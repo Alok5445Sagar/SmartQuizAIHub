@@ -1,11 +1,8 @@
 package com.smartquiz.controller;
 
-import com.smartquiz.entity.TechnologyStack;
-import com.smartquiz.entity.Topic;
 import com.smartquiz.entity.User;
-import com.smartquiz.repository.TechnologyStackRepository;
-import com.smartquiz.repository.TopicRepository;
 import com.smartquiz.repository.UserRepository;
+import com.smartquiz.service.ReferenceDataService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -17,30 +14,18 @@ import java.util.stream.Collectors;
 @RequestMapping("/api/reference")
 public class ReferenceController {
 
-    @Autowired private TechnologyStackRepository stackRepository;
-    @Autowired private TopicRepository topicRepository;
+    @Autowired private ReferenceDataService referenceDataService;
     @Autowired private UserRepository userRepository;
 
     @GetMapping("/stacks")
-    public ResponseEntity<?> getAllStacks() {
-        return ResponseEntity.ok(stackRepository.findAll().stream().map(s -> {
-            Map<String, Object> m = new HashMap<>();
-            m.put("stackId", s.getStackId());
-            m.put("stackName", s.getStackName());
-            return m;
-        }).collect(Collectors.toList()));
+    public ResponseEntity<List<ReferenceDataService.StackOption>> getAllStacks() {
+        return ResponseEntity.ok(referenceDataService.stacks());
     }
 
     @GetMapping("/topics/{stackId}")
-    public ResponseEntity<?> getTopicsByStack(@PathVariable Long stackId) {
-        return ResponseEntity.ok(topicRepository.findByStackStackId(stackId).stream().map(t -> {
-            Map<String, Object> m = new HashMap<>();
-            m.put("topicId", t.getTopicId());
-            m.put("topicName", t.getTopicName());
-            return m;
-        }).collect(Collectors.toList()));
+    public ResponseEntity<List<ReferenceDataService.TopicOption>> getTopicsByStack(@PathVariable Long stackId) {
+        return ResponseEntity.ok(referenceDataService.topics(stackId));
     }
-
     @GetMapping("/users")
     public ResponseEntity<?> getAllUsers() {
         // Participants are quiz takers, not platform users; never list them here.

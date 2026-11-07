@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { mcqAPI } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import useAutoRefresh from '../hooks/useAutoRefresh';
 import { DifficultyBadge, QuestionTypeBadge } from '../components/StatusBadge';
 import Pagination from '../components/Pagination';
 import ViewMCQModal from '../components/ViewMCQModal';
 import toast from 'react-hot-toast';
 import { useLanguage } from '../context/LanguageContext';
 
-const AUTO_REFRESH_MS = 1000;
 
 function ReviewModal({ mcq, onClose, onDone }) {
   const { t } = useLanguage();
@@ -140,33 +140,8 @@ export default function MyPendingReviewsPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  useEffect(() => {
-    if (!shouldAutoRefresh) return;
+  useAutoRefresh(() => fetchData({ background: true }), { enabled: shouldAutoRefresh });
 
-    const refreshNow = () => {
-      if (document.visibilityState === 'hidden') return;
-      fetchData({ background: true });
-    };
-
-    const intervalId = setInterval(() => {
-      refreshNow();
-    }, AUTO_REFRESH_MS);
-
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        refreshNow();
-      }
-    };
-
-    window.addEventListener('focus', refreshNow);
-    document.addEventListener('visibilitychange', handleVisibility);
-
-    return () => {
-      clearInterval(intervalId);
-      window.removeEventListener('focus', refreshNow);
-      document.removeEventListener('visibilitychange', handleVisibility);
-    };
-  }, [shouldAutoRefresh, fetchData]);
 
   const handleReviewDone = () => {
     setReviewMCQ(null);

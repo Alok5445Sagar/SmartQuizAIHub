@@ -7,9 +7,9 @@ import ViewMCQModal from '../components/ViewMCQModal';
 import toast from 'react-hot-toast';
 import { QuestionTypeBadge } from '../components/StatusBadge';
 import { useAuth } from '../context/AuthContext';
+import useAutoRefresh from '../hooks/useAutoRefresh';
 import { useLanguage } from '../context/LanguageContext';
 
-const AUTO_REFRESH_MS = 1000;
 
 function AssignReviewerModal({ mcq, onClose, onDone }) {
   const { t } = useLanguage();
@@ -405,33 +405,8 @@ export default function QuestionBankPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  useEffect(() => {
-    if (!shouldAutoRefresh) return;
+  useAutoRefresh(() => fetchData({ background: true }), { enabled: shouldAutoRefresh });
 
-    const refreshNow = () => {
-      if (document.visibilityState === 'hidden') return;
-      fetchData({ background: true });
-    };
-
-    const intervalId = setInterval(() => {
-      refreshNow();
-    }, AUTO_REFRESH_MS);
-
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        refreshNow();
-      }
-    };
-
-    window.addEventListener('focus', refreshNow);
-    document.addEventListener('visibilitychange', handleVisibility);
-
-    return () => {
-      clearInterval(intervalId);
-      window.removeEventListener('focus', refreshNow);
-      document.removeEventListener('visibilitychange', handleVisibility);
-    };
-  }, [shouldAutoRefresh, fetchData]);
 
   const handleAssignDone = () => {
     setAssignMCQ(null);

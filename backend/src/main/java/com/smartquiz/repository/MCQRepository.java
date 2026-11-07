@@ -58,6 +58,22 @@ public interface MCQRepository extends JpaRepository<MCQ, Long> {
         Pageable pageable
     );
 
+    /** Rows of [status, count] for one creator, with the same optional filters as the My Questions list. */
+    @Query("""
+        SELECT m.status, COUNT(m) FROM MCQ m
+        WHERE m.creator.enterpriseId = :enterpriseId
+        AND (:stackId IS NULL OR m.stack.stackId = :stackId)
+        AND (:topicId IS NULL OR m.topic.topicId = :topicId)
+        AND (:difficulty IS NULL OR m.difficulty = :difficulty)
+        GROUP BY m.status
+    """)
+    List<Object[]> countByStatusForCreator(
+        @Param("enterpriseId") String enterpriseId,
+        @Param("stackId") Long stackId,
+        @Param("topicId") Long topicId,
+        @Param("difficulty") MCQ.Difficulty difficulty
+    );
+
     @Query("""
         SELECT m FROM MCQ m
         WHERE (:stackId IS NULL OR m.stack.stackId = :stackId)

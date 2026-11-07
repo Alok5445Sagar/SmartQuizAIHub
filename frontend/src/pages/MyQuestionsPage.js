@@ -7,14 +7,14 @@ import ViewMCQModal from '../components/ViewMCQModal';
 import { QuestionTypeBadge } from '../components/StatusBadge';
 import { useLanguage } from '../context/LanguageContext';
 import { useAuth } from '../context/AuthContext';
-
-const AUTO_REFRESH_MS = 1000;
+import useAutoRefresh from '../hooks/useAutoRefresh';
 
 export default function MyQuestionsPage() {
   const { t, language } = useLanguage();
   const { user } = useAuth();
   const location = useLocation();
   const [data, setData] = useState(null);
+  const [stats, setStats] = useState(null);
   const [page, setPage] = useState(() => location.state?.returnToPage ?? 0);
   const [loading, setLoading] = useState(true);
   const [viewMCQ, setViewMCQ] = useState(null);
@@ -29,11 +29,6 @@ export default function MyQuestionsPage() {
   const [filterStatus, setFilterStatus] = useState(() => location.state?.returnFilters?.filterStatus ?? '');
   const shouldAutoRefresh = user?.role === 'ADMIN' || user?.role === 'SME';
 
-  // Count questions per status from current data
-  const statusCounts = (data?.content || []).reduce((acc, mcq) => {
-    acc[mcq.status] = (acc[mcq.status] || 0) + 1;
-    return acc;
-  }, {});
 
   const STATUS_TABS = [
     { label: t('all'), value: '' },
@@ -64,13 +59,17 @@ export default function MyQuestionsPage() {
       setLoading(true);
     }
     try {
-      const res = await mcqAPI.getMyQuestions(page, 10, {
+      const filters = {
         stackId: filterStack || undefined,
         topicId: filterTopic || undefined,
         difficulty: filterDifficulty || undefined,
-        status: filterStatus || undefined,
-      });
+      };
+      const [res, statsRes] = await Promise.all([
+        mcqAPI.getMyQuestions(page, 10, { ...filters, status: filterStatus || undefined }),
+        mcqAPI.getMyQuestionStats(filters).catch(() => null),
+      ]);
       setData(res.data);
+      if (statsRes) setStats(statsRes.data);
     } finally {
       if (!background) {
         setLoading(false);
@@ -80,33 +79,8 @@ export default function MyQuestionsPage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  useEffect(() => {
-    if (!shouldAutoRefresh) return;
+  useAutoRefresh(() => fetchData({ background: true }), { enabled: shouldAutoRefresh });
 
-    const refreshNow = () => {
-      if (document.visibilityState === 'hidden') return;
-      fetchData({ background: true });
-    };
-
-    const intervalId = setInterval(() => {
-      refreshNow();
-    }, AUTO_REFRESH_MS);
-
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        refreshNow();
-      }
-    };
-
-    window.addEventListener('focus', refreshNow);
-    document.addEventListener('visibilitychange', handleVisibility);
-
-    return () => {
-      clearInterval(intervalId);
-      window.removeEventListener('focus', refreshNow);
-      document.removeEventListener('visibilitychange', handleVisibility);
-    };
-  }, [shouldAutoRefresh, fetchData]);
 
   const canEdit = (status) => status === 'DRAFT' || status === 'REJECTED';
 
@@ -155,14 +129,14 @@ export default function MyQuestionsPage() {
                 }}
               >
                 {tab.label}
-                {tab.value && data?.totalElements !== undefined && (
+                {tab.value && stats && (
                   <span style={{
                     marginLeft: 6, fontSize: 11,
                     background: filterStatus === tab.value ? 'rgba(255,255,255,0.25)' : 'var(--border)',
                     color: filterStatus === tab.value ? '#fff' : 'var(--text-muted)',
                     borderRadius: 100, padding: '1px 6px'
                   }}>
-                    {statusCounts[tab.value] || 0}
+                    {stats[tab.value] || 0}
                   </span>
                 )}
                 {!tab.value && (
@@ -172,7 +146,7 @@ export default function MyQuestionsPage() {
                     color: filterStatus === tab.value ? '#fff' : 'var(--text-muted)',
                     borderRadius: 100, padding: '1px 6px'
                   }}>
-                    {data?.totalElements || 0}
+                    {stats ? stats.total : (data?.totalElements || 0)}
                   </span>
                 )}
               </button>

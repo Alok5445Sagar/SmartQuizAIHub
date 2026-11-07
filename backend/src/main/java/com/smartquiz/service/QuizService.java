@@ -340,11 +340,15 @@ public class QuizService {
 
     public Page<QuizDTO.PublishedQuizSummary> getPublishedQuizzes(int page, int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "publishedAt"));
-        return quizRepository.findAllByOrderByPublishedAtDesc(pageable)
-                .map(quiz -> {
-                    int questionCount = quizQuestionRepository.findByQuizOrderByQuestionOrderAsc(quiz).size();
-                    return QuizDTO.PublishedQuizSummary.from(quiz, buildQuizLink(quiz.getQuizCode()), questionCount, quiz.getDurationMinutes());
-                });
+        Page<Quiz> quizzes = quizRepository.findAllByOrderByPublishedAtDesc(pageable);
+        Map<Long, Integer> questionCounts = new HashMap<>();
+        if (!quizzes.isEmpty()) {
+            for (Object[] row : quizQuestionRepository.countByQuizIn(quizzes.getContent())) {
+                questionCounts.put((Long) row[0], ((Number) row[1]).intValue());
+            }
+        }
+        return quizzes.map(quiz -> QuizDTO.PublishedQuizSummary.from(quiz, buildQuizLink(quiz.getQuizCode()),
+                questionCounts.getOrDefault(quiz.getQuizId(), 0), quiz.getDurationMinutes()));
     }
 
     @Transactional
@@ -357,7 +361,7 @@ public class QuizService {
         quiz.setStatus(Quiz.Status.CLOSED);
         quiz.setClosedAt(LocalDateTime.now());
         Quiz updated = quizRepository.save(quiz);
-        int questionCount = quizQuestionRepository.findByQuizOrderByQuestionOrderAsc(updated).size();
+        int questionCount = (int) quizQuestionRepository.countByQuiz(updated);
         return QuizDTO.PublishedQuizSummary.from(updated, buildQuizLink(updated.getQuizCode()), questionCount, updated.getDurationMinutes());
     }
 
@@ -372,7 +376,7 @@ public class QuizService {
         quiz.setStatus(Quiz.Status.PUBLISHED);
         quiz.setClosedAt(null);
         Quiz reopened = quizRepository.save(quiz);
-        int questionCount = quizQuestionRepository.findByQuizOrderByQuestionOrderAsc(reopened).size();
+        int questionCount = (int) quizQuestionRepository.countByQuiz(reopened);
         return QuizDTO.PublishedQuizSummary.from(reopened, buildQuizLink(reopened.getQuizCode()), questionCount, reopened.getDurationMinutes());
     }
 
@@ -470,9 +474,9 @@ public class QuizService {
 
         Map<Long, MCQTranslation> translationByQuestionId = new HashMap<>();
         if (!"en".equals(normalizedLanguage) && !questionIds.isEmpty()) {
-            for (Long questionId : questionIds) {
-                mcqTranslationRepository.findByMcqQuestionIdAndLanguageCode(questionId, normalizedLanguage)
-                    .ifPresent(translation -> translationByQuestionId.put(questionId, translation));
+            for (MCQTranslation translation : mcqTranslationRepository
+                    .findByMcqQuestionIdInAndLanguageCode(new ArrayList<>(questionIds), normalizedLanguage)) {
+                translationByQuestionId.put(translation.getMcq().getQuestionId(), translation);
             }
         }
 
@@ -1003,16 +1007,9 @@ public class QuizService {
     public QuizDTO.LeaderboardResponse getLeaderboard(String quizCode) {
         Quiz quiz = getQuizByCodeOrThrow(quizCode);
         List<QuizAttempt> attempts = quizAttemptRepository.findLeaderboardByQuiz(quiz);
-        List<QuizAttemptAnswer> answers = attempts.isEmpty()
-            ? Collections.emptyList()
-            : quizAttemptAnswerRepository.findByAttemptIn(attempts);
-
-        Map<Long, Integer> attemptedByAttemptId = answers.stream()
-            .filter(answer -> answer.getAttempt() != null)
-            .collect(Collectors.groupingBy(
-                answer -> answer.getAttempt().getAttemptId(),
-                Collectors.collectingAndThen(Collectors.counting(), Long::intValue)
-            ));
+        Map<Long, Integer> attemptedByAttemptId = attempts.isEmpty()
+            ? Collections.emptyMap()
+            : answerCounts(quizAttemptAnswerRepository.countPerAttemptForQuiz(quiz));
 
         List<QuizDTO.LeaderboardEntry> entries = new ArrayList<>();
         int rank = 1;
@@ -1051,22 +1048,15 @@ public class QuizService {
                 .orElseThrow(() -> new NotFoundException("Topic not found"));
 
             String normalizedType = normalizeParticipantTypeOrAll(participantType);
-            List<Quiz> quizzesForTopic = quizRepository.findAll().stream()
-                .filter(quiz -> quiz.getTopic() != null && Objects.equals(quiz.getTopic().getTopicId(), topicId))
-                .collect(Collectors.toList());
-
-            List<QuizAttempt> attempts = quizzesForTopic.isEmpty()
-                ? Collections.emptyList()
-                : quizAttemptRepository.findAll().stream()
-                    .filter(attempt -> attempt.getQuiz() != null && Objects.equals(attempt.getQuiz().getTopic().getTopicId(), topicId))
+            List<QuizAttempt> attempts = quizAttemptRepository.findByQuizTopicIdWithQuiz(topicId).stream()
                     .filter(attempt -> matchesParticipantTypeOrAll(attempt, normalizedType))
                     .collect(Collectors.toList());
 
-            List<QuizAttemptAnswer> answers = attempts.isEmpty()
-                ? Collections.emptyList()
-                : quizAttemptAnswerRepository.findByAttemptIn(attempts);
+            Map<Long, Integer> attemptedByAttemptId = attempts.isEmpty()
+                ? Collections.emptyMap()
+                : answerCounts(quizAttemptAnswerRepository.countPerAttemptForTopic(topicId));
 
-            List<AggregatedParticipantLeaderboard> aggregated = buildAggregatedLeaderboard(attempts, answers);
+            List<AggregatedParticipantLeaderboard> aggregated = buildAggregatedLeaderboard(attempts, attemptedByAttemptId);
             List<QuizDTO.TopicLeaderboardEntry> rows = new ArrayList<>();
             int rank = 1;
             for (AggregatedParticipantLeaderboard entry : aggregated) {
@@ -1100,15 +1090,15 @@ public class QuizService {
             public QuizDTO.OverallLeaderboardResponse getOverallLeaderboard(String participantType) {
             String normalizedType = normalizeParticipantTypeOrAll(participantType);
 
-            List<QuizAttempt> attempts = quizAttemptRepository.findAll().stream()
+            List<QuizAttempt> attempts = quizAttemptRepository.findAllWithQuiz().stream()
                 .filter(attempt -> matchesParticipantTypeOrAll(attempt, normalizedType))
                 .collect(Collectors.toList());
 
-            List<QuizAttemptAnswer> answers = attempts.isEmpty()
-                ? Collections.emptyList()
-                : quizAttemptAnswerRepository.findByAttemptIn(attempts);
+            Map<Long, Integer> attemptedByAttemptId = attempts.isEmpty()
+                ? Collections.emptyMap()
+                : answerCounts(quizAttemptAnswerRepository.countPerAttempt());
 
-            List<AggregatedParticipantLeaderboard> aggregated = buildAggregatedLeaderboard(attempts, answers);
+            List<AggregatedParticipantLeaderboard> aggregated = buildAggregatedLeaderboard(attempts, attemptedByAttemptId);
             List<QuizDTO.OverallLeaderboardEntry> rows = new ArrayList<>();
             int rank = 1;
             for (AggregatedParticipantLeaderboard entry : aggregated) {
@@ -1135,21 +1125,11 @@ public class QuizService {
 
     public List<QuizDTO.HostedTopicOption> getHostedTopicsForLeaderboard() {
         Map<Long, TopicHostedAggregate> hostedByTopic = new HashMap<>();
-
-        for (Quiz quiz : quizRepository.findAll()) {
-            if (quiz.getTopic() == null || quiz.getTopic().getTopicId() == null) {
-                continue;
-            }
-
-            Long topicId = quiz.getTopic().getTopicId();
-            TopicHostedAggregate aggregate = hostedByTopic.computeIfAbsent(topicId, unused ->
-                new TopicHostedAggregate(
-                    topicId,
-                    quiz.getStack() == null ? "" : quiz.getStack().getStackName(),
-                    quiz.getTopic().getTopicName()
-                )
-            );
-            aggregate.quizzesHosted += 1;
+        for (Object[] row : quizRepository.countByTopic()) {
+            Long topicId = (Long) row[0];
+            TopicHostedAggregate aggregate = new TopicHostedAggregate(topicId, row[1] == null ? "" : (String) row[1], (String) row[2]);
+            aggregate.quizzesHosted = ((Number) row[3]).intValue();
+            hostedByTopic.put(topicId, aggregate);
         }
 
         return hostedByTopic.values().stream()
@@ -1166,26 +1146,16 @@ public class QuizService {
     public QuizDTO.ParticipantTopicAnalyticsResponse getParticipantTopicAnalytics(String participantType) {
         String normalizedType = normalizeParticipantTypeOrAll(participantType);
 
-        List<Quiz> quizzes = quizRepository.findAll();
-        List<QuizAttempt> attempts = quizAttemptRepository.findAll().stream()
+        // Attempts are loaded once with their quiz; answers are only ever counted, in the database.
+        List<QuizAttempt> attempts = quizAttemptRepository.findAllWithQuiz().stream()
             .filter(attempt -> matchesParticipantTypeOrAll(attempt, normalizedType))
             .collect(Collectors.toList());
 
-        List<QuizAttemptAnswer> answers = quizzes.isEmpty()
-            ? Collections.emptyList()
-            : quizAttemptAnswerRepository.findByAttemptQuizIn(quizzes);
-        Set<Long> filteredAttemptIds = attempts.stream().map(QuizAttempt::getAttemptId).collect(Collectors.toSet());
-        List<QuizAttemptAnswer> filteredAnswers = answers.stream()
-            .filter(answer -> answer.getAttempt() != null && filteredAttemptIds.contains(answer.getAttempt().getAttemptId()))
-            .collect(Collectors.toList());
-
         Map<Long, Integer> hostedByTopicId = new HashMap<>();
-        for (Quiz quiz : quizzes) {
-            if (quiz.getTopic() == null || quiz.getTopic().getTopicId() == null) {
-                continue;
-            }
-            hostedByTopicId.merge(quiz.getTopic().getTopicId(), 1, Integer::sum);
+        for (Object[] row : quizRepository.countByTopic()) {
+            hostedByTopicId.put((Long) row[0], ((Number) row[3]).intValue());
         }
+        int totalQuizzes = hostedByTopicId.values().stream().mapToInt(Integer::intValue).sum();
 
         Map<String, ParticipantTopicAccumulator> byParticipantTopic = new HashMap<>();
         for (QuizAttempt attempt : attempts) {
@@ -1239,14 +1209,14 @@ public class QuizService {
                         .thenComparing(QuizDTO.ParticipantTopicAnalyticsRow::getTopicName, String.CASE_INSENSITIVE_ORDER))
                 .collect(Collectors.toList());
 
-            Map<Long, Long> answerCountByAttemptId = filteredAnswers.stream()
-                .filter(answer -> answer.getAttempt() != null)
-                .collect(Collectors.groupingBy(answer -> answer.getAttempt().getAttemptId(), Collectors.counting()));
+            Map<Long, Integer> answerCountByAttemptId = attempts.isEmpty()
+                ? Collections.emptyMap()
+                : answerCounts(quizAttemptAnswerRepository.countPerAttempt());
 
             int completedAttempts = (int) attempts.stream()
                 .filter(attempt -> {
                     int total = safeInt(attempt.getTotalQuestions());
-                    long answered = answerCountByAttemptId.getOrDefault(attempt.getAttemptId(), 0L);
+                    int answered = answerCountByAttemptId.getOrDefault(attempt.getAttemptId(), 0);
                     return total > 0 && answered >= total;
                 })
                 .count();
@@ -1256,7 +1226,7 @@ public class QuizService {
             double minScorePercent = attempts.stream().mapToDouble(this::scorePercent).min().orElse(0.0);
 
             QuizDTO.QuizAnalyticsSummary quizAnalytics = new QuizDTO.QuizAnalyticsSummary(
-                quizzes.size(),
+                totalQuizzes,
                 (int) attempts.stream().map(this::buildParticipantKey).distinct().count(),
                 round2(avgScorePercent),
                 round2(maxScorePercent),
@@ -1299,19 +1269,12 @@ public class QuizService {
                 .collect(Collectors.toList());
 
             Map<Long, QuestionAggregate> questionAggregateMap = new HashMap<>();
-            for (QuizAttemptAnswer answer : filteredAnswers) {
-                if (answer.getQuestion() == null) {
-                continue;
-                }
-                MCQ question = answer.getQuestion();
-                QuestionAggregate aggregate = questionAggregateMap.computeIfAbsent(
-                    question.getQuestionId(),
-                    unused -> new QuestionAggregate(question)
-                );
-                aggregate.attemptedCount++;
-                if (!answer.isCorrect()) {
-                aggregate.incorrectCount++;
-                }
+            for (Object[] row : quizAttemptAnswerRepository.questionStats(normalizedType)) {
+                QuestionAggregate aggregate = new QuestionAggregate(
+                    (Long) row[0], (String) row[1], (String) row[2], (String) row[3]);
+                aggregate.attemptedCount = ((Number) row[4]).intValue();
+                aggregate.incorrectCount = row[5] == null ? 0 : ((Number) row[5]).intValue();
+                questionAggregateMap.put(aggregate.questionId, aggregate);
             }
 
             List<QuizDTO.QuestionAnalyticsRow> questionAnalytics = questionAggregateMap.values().stream()
@@ -1501,15 +1464,17 @@ public class QuizService {
         return "";
     }
 
-    private List<AggregatedParticipantLeaderboard> buildAggregatedLeaderboard(List<QuizAttempt> attempts,
-                                                                               List<QuizAttemptAnswer> answers) {
-        Map<Long, Integer> attemptedByAttemptId = answers.stream()
-                .filter(answer -> answer.getAttempt() != null)
-                .collect(Collectors.groupingBy(
-                        answer -> answer.getAttempt().getAttemptId(),
-                        Collectors.collectingAndThen(Collectors.counting(), Long::intValue)
-                ));
+    /** Turns [attemptId, count] rows into a map. */
+    private static Map<Long, Integer> answerCounts(List<Object[]> rows) {
+        Map<Long, Integer> counts = new HashMap<>();
+        for (Object[] row : rows) {
+            counts.put((Long) row[0], ((Number) row[1]).intValue());
+        }
+        return counts;
+    }
 
+    private List<AggregatedParticipantLeaderboard> buildAggregatedLeaderboard(List<QuizAttempt> attempts,
+                                                                               Map<Long, Integer> attemptedByAttemptId) {
         Map<String, AggregatedParticipantLeaderboard> byParticipant = new HashMap<>();
         for (QuizAttempt attempt : attempts) {
             String participantKey = buildParticipantKey(attempt);
@@ -1761,11 +1726,11 @@ public class QuizService {
         private int attemptedCount;
         private int incorrectCount;
 
-        private QuestionAggregate(MCQ question) {
-            this.questionId = question.getQuestionId();
-            this.questionStem = question.getQuestionStem();
-            this.stackName = question.getStack() == null ? "" : question.getStack().getStackName();
-            this.topicName = question.getTopic() == null ? "" : question.getTopic().getTopicName();
+        private QuestionAggregate(Long questionId, String questionStem, String stackName, String topicName) {
+            this.questionId = questionId;
+            this.questionStem = questionStem;
+            this.stackName = stackName == null ? "" : stackName;
+            this.topicName = topicName == null ? "" : topicName;
         }
     }
 

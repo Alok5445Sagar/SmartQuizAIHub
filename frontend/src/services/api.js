@@ -48,6 +48,15 @@ export const mcqAPI = {
     if (filters.status)     params.append('status', filters.status);
     return api.get(`/api/mcq/my-questions?${params.toString()}`);
   },
+  // Per-status counts across all pages; status is not a filter here so every tab gets its count.
+  getMyQuestionStats: (filters = {}) => {
+    const params = new URLSearchParams();
+    if (filters.stackId)    params.append('stackId', filters.stackId);
+    if (filters.topicId)    params.append('topicId', filters.topicId);
+    if (filters.difficulty) params.append('difficulty', filters.difficulty);
+    const query = params.toString();
+    return api.get(`/api/mcq/my-questions/stats${query ? `?${query}` : ''}`);
+  },
   getMyPendingReviews: (page = 0, size = 10) => api.get(`/api/mcq/my-pending-reviews?page=${page}&size=${size}&languageCode=${encodeURIComponent(getCurrentLanguageCode())}`),
   getById: (id, { languageCode } = {}) => {
     const code = languageCode || getCurrentLanguageCode();

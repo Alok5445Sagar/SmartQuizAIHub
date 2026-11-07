@@ -5,6 +5,7 @@ import { quizPublicAPI } from '../services/api';
 import ChatAttachment from '../components/ChatAttachment';
 import { clearParticipantSession, getParticipantSession, setParticipantSession } from '../services/participantSession';
 import { useLanguage } from '../context/LanguageContext';
+import useAutoRefresh from '../hooks/useAutoRefresh';
 
 const formatPercent = (score, total) => {
   const safeScore = Number(score) || 0;
@@ -52,7 +53,7 @@ const toNumericMessageId = (value) => {
 };
 
 const emojiSet = ['😀', '😁', '😂', '😊', '😉', '😍', '🤝', '👍', '🙌', '🔥', '🎯', '✅', '👏', '💡', '🙏', '🚀'];
-const CHAT_ACTIVE_SYNC_INTERVAL_MS = 900;
+const CHAT_ACTIVE_SYNC_INTERVAL_MS = 3000;
 const CHAT_USERS_SYNC_INTERVAL_MS = 3000;
 
 const panelStyle = {
@@ -251,12 +252,12 @@ export default function ParticipantPortalPage() {
     setHasLoadedInitialDashboard(false);
     // Keep portal responsive on login by loading dashboard in background.
     loadDashboard(participantIdentity, { showGlobalLoader: false });
-    const id = setInterval(
-      () => loadDashboard(participantIdentity, { preserveScroll: true, showGlobalLoader: false }),
-      15000
-    );
-    return () => clearInterval(id);
   }, [participantIdentity, language]);
+
+  useAutoRefresh(
+    () => loadDashboard(participantIdentity, { preserveScroll: true, showGlobalLoader: false }),
+    { enabled: Boolean(participantIdentity) }
+  );
 
   const loginEmployee = async () => {
     if (!enterpriseId || !password) {
@@ -574,18 +575,18 @@ export default function ParticipantPortalPage() {
     }
   }, [canUseParticipantChat, selectedChatUserId]);
 
+  // Fallback only: while the live stream is connected, new messages arrive as stream events.
   useEffect(() => {
-    if (!canUseParticipantChat || !selectedChatUserId) return;
+    if (!canUseParticipantChat || !selectedChatUserId || chatStreamConnected) return;
 
     const syncConversation = () => {
       if (document.visibilityState === 'hidden') return;
       loadChatHistory(selectedChatUserId, { background: true });
     };
 
-    syncConversation();
     const intervalId = setInterval(syncConversation, CHAT_ACTIVE_SYNC_INTERVAL_MS);
     return () => clearInterval(intervalId);
-  }, [canUseParticipantChat, selectedChatUserId, participantIdentity?.participantEnterpriseId, participantIdentity?.authToken]);
+  }, [canUseParticipantChat, selectedChatUserId, chatStreamConnected, participantIdentity?.participantEnterpriseId, participantIdentity?.authToken]);
 
   useEffect(() => {
     const onResize = () => {
