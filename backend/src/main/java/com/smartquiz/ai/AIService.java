@@ -13,20 +13,15 @@ import java.util.stream.Collectors;
 import java.util.Collection;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.time.Duration;
 import java.nio.charset.StandardCharsets;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.ai.azure.openai.AzureOpenAiChatOptions;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
+import org.springframework.ai.ollama.api.OllamaOptions;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -57,26 +52,14 @@ public class AIService {
             "java", "spring", "boot", "python", "javascript", "typescript", "react", "node", "sql", "api"
         ));
 
-    @Value("${app.ai.api-key:}")
-    private String apiKey;
-
-    @Value("${app.ai.api-url}")
-    private String apiUrl;
-
-    @Value("${app.ai.model}")
+    @Value("${app.ai.model:qwen2.5:3b}")
     private String model;
 
-    @Value("${app.ai.provider:azure-openai}")
-    private String aiProvider;
-
-    @Value("${app.ai.openai-compatible.chat-path:/chat/completions}")
-    private String openAiCompatibleChatPath;
+    @Value("${app.ai.num-ctx:8192}")
+    private int numCtx;
 
     @Value("${app.ai.similarity-threshold:0.70}")
     private double similarityThreshold;
-
-    @Value("${app.ai.timeout-seconds:300}")
-    private int aiTimeoutSeconds;
 
     @Value("${app.ai.generate-use-ai-similarity:false}")
     private boolean generateUseAiSimilarity;
@@ -89,9 +72,6 @@ public class AIService {
 
     @Value("${app.ai.max-output-tokens:1200}")
     private int maxOutputTokens;
-
-    @Value("${app.ai.fallback-model:}")
-    private String fallbackModel;
 
     @Value("${app.ai.retry.max-attempts:4}")
     private int retryMaxAttempts;
@@ -110,7 +90,6 @@ public class AIService {
 
     private final ChatClient.Builder chatClientBuilder;
     private ChatClient chatClient;
-    private WebClient webClient;
 
     private ObjectMapper lenientObjectMapper;
 
@@ -122,10 +101,6 @@ public class AIService {
     @jakarta.annotation.PostConstruct
     public void init() {
         this.chatClient = chatClientBuilder.build();
-        this.webClient = WebClient.builder()
-            .codecs(configurer -> configurer.defaultCodecs()
-                .maxInMemorySize(10 * 1024 * 1024))
-            .build();
 
         this.lenientObjectMapper = objectMapper.copy()
             .configure(JsonReadFeature.ALLOW_SINGLE_QUOTES.mappedFeature(), true)
@@ -134,7 +109,7 @@ public class AIService {
             .configure(JsonReadFeature.ALLOW_JAVA_COMMENTS.mappedFeature(), true)
             .configure(JsonReadFeature.ALLOW_YAML_COMMENTS.mappedFeature(), true);
     }
-    // ── AI QUESTION GENERATION ────────────────────────────────────
+    // â”€â”€ AI QUESTION GENERATION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     public List<MCQDTO.CreateRequest> generateQuestions(
             TechnologyStack stack, Topic topic, String difficulty, int count,
@@ -163,7 +138,7 @@ public class AIService {
 
         String prompt = buildGenerationPrompt(
             stack.getStackName(), topic.getTopicName(), difficulty, count, requestAvoidStems, normalizedQuestionType);
-        String rawResponse = callAzureOpenAIAPI(prompt);
+        String rawResponse = callModel(prompt);
 
         List<MCQDTO.CreateRequest> generated = parseGeneratedQuestions(
                 rawResponse, stack.getStackId(), topic.getTopicId(), difficulty, normalizedQuestionType);
@@ -193,7 +168,7 @@ public class AIService {
                     && !hasSimilarInBatch(req, alreadyAcceptedInRequest)) {
                 screened.add(req);
             } else {
-                log.info("Generated question screened out due to similarity ≥30%. Requesting replacement.");
+                log.info("Generated question screened out due to similarity â‰¥30%. Requesting replacement.");
             }
         }
 
@@ -207,7 +182,7 @@ public class AIService {
                 int retryRequestCount = Math.min(stillNeeded + Math.max(1, stillNeeded), 20);
                 String retryPrompt = buildGenerationPrompt(
                     stack.getStackName(), topic.getTopicName(), difficulty, retryRequestCount, retryAvoidStems, normalizedQuestionType);
-                String retryResponse = callAzureOpenAIAPI(retryPrompt);
+                String retryResponse = callModel(retryPrompt);
                 List<MCQDTO.CreateRequest> retryGenerated = parseGeneratedQuestions(
                         retryResponse, stack.getStackId(), topic.getTopicId(), difficulty, normalizedQuestionType);
 
@@ -237,7 +212,7 @@ public class AIService {
             List<String> singleAvoidStems = buildRetryAvoidStems(existingStems, avoidCandidates, 120);
             String singlePrompt = buildGenerationPrompt(
                     stack.getStackName(), topic.getTopicName(), difficulty, 1, singleAvoidStems, normalizedQuestionType);
-            String singleResponse = callAzureOpenAIAPI(singlePrompt);
+            String singleResponse = callModel(singlePrompt);
             List<MCQDTO.CreateRequest> singleGenerated = parseGeneratedQuestions(
                     singleResponse, stack.getStackId(), topic.getTopicId(), difficulty, normalizedQuestionType);
 
@@ -422,38 +397,99 @@ public class AIService {
         return value.substring(0, maxLength);
     }
 
+    private static final String DEFAULT_SYSTEM_PROMPT = "You are a quiz assistant. Follow the user's response format exactly.";
+
+    /** Calls the model with the quiz-assistant system prompt (generation, similarity, translation). */
+    private String callModel(String prompt) {
+        return callAssistantChat(DEFAULT_SYSTEM_PROMPT, prompt, maxOutputTokens, 0.2d);
+    }
+
     private String callAssistantChat(String systemPrompt, String userPrompt, int maxTokens, double temperature) {
-        if (isBlank(apiKey)) {
-            throw new RuntimeException("Azure OpenAI API key is missing. Set app.ai.api-key in application.properties.");
-        }
-
-        if ("openai-compatible".equalsIgnoreCase(aiProvider)) {
-            return callOpenAiCompatibleAPI(systemPrompt, userPrompt, maxTokens, temperature);
-        }
-
         String boundedPrompt = enforceRequestSizeLimit(userPrompt);
-        List<String> deployments = new ArrayList<>();
-        deployments.add(model);
+        int maxAttempts = Math.max(1, retryMaxAttempts);
+        long backoffMs = Math.max(200L, retryInitialBackoffMs);
 
-        if (!isBlank(fallbackModel) && !fallbackModel.equalsIgnoreCase(model)) {
-            deployments.add(fallbackModel);
-        }
-
-        RuntimeException lastError = null;
-        for (int i = 0; i < deployments.size(); i++) {
-            String deployment = deployments.get(i);
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
-                return callAzureDeploymentWithRetry(systemPrompt, boundedPrompt, deployment, maxTokens, temperature);
-            } catch (RuntimeException ex) {
-                lastError = ex;
-                if (i < deployments.size() - 1) {
-                    log.warn("Assistant chat failed on deployment '{}'. Trying fallback deployment '{}'. Reason: {}",
-                            deployment, deployments.get(i + 1), safeSnippet(ex.getMessage()));
+                OllamaOptions options = OllamaOptions.builder()
+                        .model(model)
+                        .temperature(temperature)
+                        .topP(0.9)
+                        .numPredict(maxTokens)
+                        .numCtx(numCtx)
+                        .build();
+
+                String modelResponse = chatClient.prompt()
+                        .system(systemPrompt)
+                        .user(boundedPrompt)
+                        .options(options)
+                        .call()
+                        .content();
+
+                if (modelResponse == null || modelResponse.isBlank()) {
+                    throw new RuntimeException("Ollama returned an empty response.");
                 }
+                return modelResponse;
+            } catch (Exception e) {
+                RuntimeException mapped = mapOllamaError(e);
+                if (!isRetryableError(e) || attempt == maxAttempts) {
+                    throw mapped;
+                }
+                log.warn("Transient AI failure (attempt {}/{}). Retrying in {} ms. Cause: {}",
+                        attempt, maxAttempts, backoffMs, safeSnippet(e.getMessage()));
+                try {
+                    Thread.sleep(backoffMs);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("AI retry interrupted while waiting for backoff.");
+                }
+                backoffMs = Math.min(backoffMs * 2L, 8000L);
             }
         }
+        throw new RuntimeException("AI service error: retry loop exhausted unexpectedly.");
+    }
 
-        throw (lastError != null) ? lastError : new RuntimeException("AI service error: unknown failure");
+    private RuntimeException mapOllamaError(Exception e) {
+        String msg = e.getMessage() == null ? "" : e.getMessage().toLowerCase();
+        log.error("Ollama call failed (model={}): {}", model, e.getMessage());
+
+        if (msg.contains("connection refused") || msg.contains("failed to connect")
+                || msg.contains("i/o error") || msg.contains("no route")) {
+            return new RuntimeException("Local AI service (Ollama) is unavailable. Make sure Ollama is running and reachable.");
+        }
+        if (msg.contains("timed out") || msg.contains("timeout")) {
+            return new RuntimeException("Local AI model timed out. Try fewer questions or increase the AI read timeout.");
+        }
+        if (msg.contains("404") || (msg.contains("model") && msg.contains("not found"))) {
+            return new RuntimeException("AI model '" + model + "' is not available in Ollama. Run: ollama pull " + model);
+        }
+        return new RuntimeException("AI service error: " + e.getMessage());
+    }
+
+    private boolean isRetryableError(Exception e) {
+        String msg = e.getMessage() == null ? "" : e.getMessage().toLowerCase();
+        // Retry only transient transport problems; a missing model or bad request will not fix itself.
+        return msg.contains("connection reset")
+                || msg.contains("503")
+                || msg.contains("502")
+                || msg.contains("500")
+                || msg.contains("empty response");
+    }
+
+    private String enforceRequestSizeLimit(String prompt) {
+        if (prompt == null) {
+            return "";
+        }
+        int limitBytes = Math.max(4096, maxRequestBytes);
+        if (prompt.getBytes(StandardCharsets.UTF_8).length <= limitBytes) {
+            return prompt;
+        }
+        String bounded = prompt;
+        while (bounded.getBytes(StandardCharsets.UTF_8).length > limitBytes && bounded.length() > 512) {
+            bounded = bounded.substring(0, bounded.length() - 256);
+        }
+        log.warn("AI prompt truncated to {} bytes.", bounded.getBytes(StandardCharsets.UTF_8).length);
+        return bounded + "\n\n[Truncated to respect request-size limit.]";
     }
 
     private List<String> buildRetryAvoidStems(List<String> existingStems,
@@ -592,7 +628,7 @@ public class AIService {
 
         String candidate = buildQuestionText(questionStem, optionA, optionB, optionC, optionD, optionE, optionF);
         String prompt = buildSimilarityPrompt(candidate, existing);
-        String rawResponse = callAzureOpenAIAPI(prompt);
+        String rawResponse = callModel(prompt);
         SimilarityCheckResponse aiResult = parseSimilarityResponse(rawResponse, existing);
         return aiResult.isHasSimilar() ? aiResult : deterministic;
     }
@@ -823,316 +859,6 @@ public class AIService {
             answerFormatRules,
             avoidSection,
             responseExample);
-    }
-
-    private String callAzureOpenAIAPI(String prompt) {
-        if (isBlank(apiKey)) {
-            throw new RuntimeException("Azure OpenAI API key is missing. Set app.ai.api-key in application.properties.");
-        }
-
-        if ("openai-compatible".equalsIgnoreCase(aiProvider)) {
-            return callOpenAiCompatibleAPI(prompt);
-        }
-
-        String boundedPrompt = enforceRequestSizeLimit(prompt);
-        List<String> deployments = new ArrayList<>();
-        deployments.add(model);
-
-        if (!isBlank(fallbackModel) && !fallbackModel.equalsIgnoreCase(model)) {
-            deployments.add(fallbackModel);
-        }
-
-        RuntimeException lastError = null;
-        for (int i = 0; i < deployments.size(); i++) {
-            String deployment = deployments.get(i);
-            try {
-                return callAzureDeploymentWithRetry(boundedPrompt, deployment);
-            } catch (RuntimeException ex) {
-                lastError = ex;
-                if (i < deployments.size() - 1) {
-                    log.warn("AI call failed on deployment '{}'. Trying fallback deployment '{}'. Reason: {}",
-                            deployment, deployments.get(i + 1), safeSnippet(ex.getMessage()));
-                }
-            }
-        }
-
-        throw (lastError != null) ? lastError : new RuntimeException("AI service error: unknown failure");
-    }
-
-    private String callAzureDeploymentWithRetry(String prompt, String deployment) {
-        return callAzureDeploymentWithRetry(
-                "You are a quiz assistant. Follow the user's response format exactly.",
-                prompt,
-                deployment,
-                maxOutputTokens,
-                0.2d);
-    }
-
-    private String callAzureDeploymentWithRetry(
-            String systemPrompt,
-            String userPrompt,
-            String deployment,
-            int maxTokens,
-            double temperature) {
-        int maxAttempts = Math.max(1, retryMaxAttempts);
-        long backoffMs = Math.max(200L, retryInitialBackoffMs);
-
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            try {
-                AzureOpenAiChatOptions options = AzureOpenAiChatOptions.builder()
-                        .deploymentName(deployment)
-                        .temperature(temperature)
-                        .topP(0.9)
-                        .maxTokens(maxTokens)
-                        .build();
-
-                String modelResponse = chatClient.prompt()
-                        .system(systemPrompt)
-                        .user(userPrompt)
-                        .options(options)
-                        .call()
-                        .content();
-
-                if (modelResponse == null || modelResponse.isBlank()) {
-                    throw new RuntimeException("Azure OpenAI returned an empty response payload.");
-                }
-
-                return modelResponse;
-            } catch (Exception e) {
-                RuntimeException mapped = mapAzureError(e, deployment);
-                boolean retryable = isRetryableError(mapped.getMessage());
-
-                if (!retryable || attempt == maxAttempts) {
-                    throw mapped;
-                }
-
-                log.warn("Transient AI gateway failure (attempt {}/{} on '{}'). Retrying in {} ms. Cause: {}",
-                        attempt, maxAttempts, deployment, backoffMs, safeSnippet(mapped.getMessage()));
-
-                try {
-                    Thread.sleep(backoffMs);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    throw new RuntimeException("AI retry interrupted while waiting for backoff.");
-                }
-
-                backoffMs = Math.min(backoffMs * 2L, 8000L);
-            }
-        }
-
-        throw new RuntimeException("AI service error: retry loop exhausted unexpectedly.");
-    }
-
-    private RuntimeException mapAzureError(Exception e, String deployment) {
-        String msg = (e.getMessage() == null) ? "" : e.getMessage().toLowerCase();
-        log.error("Azure OpenAI API call failed (deployment={}): {}", deployment, e.getMessage());
-
-        if (msg.contains("timed out") || msg.contains("timeout")) {
-            return new RuntimeException(
-                    "AI model response timed out from Azure OpenAI deployment '" + deployment
-                            + "'. Try a smaller question count, or increase app.ai.timeout-seconds.");
-        }
-
-        if (msg.contains("connection refused") || msg.contains("failed to connect") || msg.contains("no route")) {
-            return new RuntimeException("Azure OpenAI service unavailable. Verify app.ai.api-url and network connectivity.");
-        }
-
-        if (msg.contains("401") || msg.contains("403") || msg.contains("unauthorized") || msg.contains("forbidden")) {
-            return new RuntimeException("Azure OpenAI authentication failed. Verify app.ai.api-key.");
-        }
-
-        if (msg.contains("404") || (msg.contains("deployment") && msg.contains("not found"))) {
-            return new RuntimeException("Azure OpenAI deployment was not found. Verify deployment name: " + deployment + ".");
-        }
-
-        if (msg.contains("413") || msg.contains("payload too large") || msg.contains("request entity too large")) {
-            return new RuntimeException("AI request body exceeded gateway limits. Prompt was reduced; retry with fewer questions if needed.");
-        }
-
-        return new RuntimeException("AI service error: " + e.getMessage());
-    }
-
-    private boolean isRetryableError(String message) {
-        String msg = message == null ? "" : message.toLowerCase();
-        return msg.contains("429")
-                || msg.contains("too many requests")
-                || msg.contains("500")
-                || msg.contains("502")
-                || msg.contains("503")
-                || msg.contains("504")
-                || msg.contains("timed out")
-                || msg.contains("timeout")
-                || msg.contains("gateway");
-    }
-
-    private String enforceRequestSizeLimit(String prompt) {
-        if (prompt == null) {
-            return "";
-        }
-
-        int limitBytes = Math.max(4096, maxRequestBytes);
-        String bounded = prompt;
-        byte[] raw = bounded.getBytes(StandardCharsets.UTF_8);
-        if (raw.length <= limitBytes) {
-            return bounded;
-        }
-
-        String suffix = "\n\n[Truncated to respect API gateway request-size limit.]";
-        int targetChars = Math.max(512, (int) (bounded.length() * ((double) limitBytes / (double) raw.length)) - suffix.length());
-        if (targetChars > bounded.length()) {
-            targetChars = bounded.length();
-        }
-
-        bounded = bounded.substring(0, targetChars) + suffix;
-        while (bounded.getBytes(StandardCharsets.UTF_8).length > limitBytes && bounded.length() > 512) {
-            bounded = bounded.substring(0, bounded.length() - 128);
-        }
-
-        log.warn("AI prompt truncated from {} to {} bytes to satisfy API gateway limits.",
-                raw.length, bounded.getBytes(StandardCharsets.UTF_8).length);
-        return bounded;
-    }
-
-    private String callOpenAiCompatibleAPI(String prompt) {
-        return callOpenAiCompatibleAPI(
-                "You are a quiz assistant. Follow the user's response format exactly.",
-                prompt,
-                maxOutputTokens,
-                0.2d);
-    }
-
-    private String callOpenAiCompatibleAPI(String systemPrompt, String userPrompt, int maxTokens, double temperature) {
-        try {
-            String chatEndpoint = resolveOpenAiCompatibleEndpoint();
-
-            Map<String, Object> requestBody = new HashMap<>();
-            List<Map<String, String>> messages = new ArrayList<>();
-            messages.add(Map.of("role", "system", "content", systemPrompt));
-            messages.add(Map.of("role", "user", "content", userPrompt));
-            requestBody.put("model", model);
-            requestBody.put("messages", messages);
-            requestBody.put("temperature", temperature);
-            requestBody.put("top_p", 0.9);
-            requestBody.put("max_tokens", maxTokens);
-
-            String response = webClient.post()
-                    .uri(chatEndpoint)
-                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                    .header("api-key", apiKey)
-                    .bodyValue(requestBody)
-                    .retrieve()
-                    .bodyToMono(String.class)
-                    .timeout(Duration.ofSeconds(aiTimeoutSeconds))
-                    .block();
-
-            JsonNode root = objectMapper.readTree(response);
-            String content = root.path("choices").path(0).path("message").path("content").asText("").trim();
-            if (!content.isBlank()) {
-                return content;
-            }
-
-            // Fallback for alternate response structures.
-            content = extractModelResponse(root);
-            if (!content.isBlank()) {
-                return content;
-            }
-
-            throw new RuntimeException("OpenAI-compatible endpoint returned an empty response payload. Raw: " + safeSnippet(response));
-        } catch (Exception e) {
-            String msg = (e.getMessage() == null) ? "" : e.getMessage().toLowerCase();
-            log.error("OpenAI-compatible API call failed: {}", e.getMessage());
-
-            if (msg.contains("404") || msg.contains("not found") || msg.contains("model") && msg.contains("not found")) {
-                throw new RuntimeException("AI model or route was not found on APIM endpoint. Verify app.ai.api-url, app.ai.openai-compatible.chat-path, and app.ai.model.");
-            }
-
-            if (msg.contains("401") || msg.contains("403") || msg.contains("unauthorized") || msg.contains("forbidden")) {
-                throw new RuntimeException("OpenAI-compatible authentication failed. Verify app.ai.api-key.");
-            }
-
-            if (msg.contains("timed out") || msg.contains("timeout")) {
-                throw new RuntimeException("AI model response timed out. Try a smaller question count, or increase app.ai.timeout-seconds.");
-            }
-
-            throw new RuntimeException("AI service error: " + e.getMessage());
-        }
-    }
-
-    private String resolveOpenAiCompatibleEndpoint() {
-        String base = apiUrl == null ? "" : apiUrl.trim();
-        if (base.isBlank()) {
-            throw new RuntimeException("app.ai.api-url is empty.");
-        }
-
-        String lower = base.toLowerCase();
-        if (lower.contains("/chat/completions") || lower.contains("/v1/chat/completions")) {
-            return base;
-        }
-
-        String normalizedBase = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
-        String normalizedPath = openAiCompatibleChatPath == null || openAiCompatibleChatPath.isBlank()
-                ? "/chat/completions"
-                : (openAiCompatibleChatPath.startsWith("/") ? openAiCompatibleChatPath : "/" + openAiCompatibleChatPath);
-        return normalizedBase + normalizedPath;
-    }
-
-    private String extractModelResponse(JsonNode root) {
-        if (root == null || root.isNull()) {
-            return "";
-        }
-
-        JsonNode responseNode = root.path("response");
-        if (!responseNode.isMissingNode() && !responseNode.isNull()) {
-            if (responseNode.isTextual()) {
-                String value = responseNode.asText("").trim();
-                if (!value.isBlank()) {
-                    return value;
-                }
-            }
-            if (responseNode.isObject() || responseNode.isArray()) {
-                return responseNode.toString();
-            }
-        }
-
-        // Some runtimes/models may return chat-style content shape.
-        JsonNode messageContent = root.path("message").path("content");
-        if (!messageContent.isMissingNode() && !messageContent.isNull()) {
-            String value = messageContent.asText("").trim();
-            if (!value.isBlank()) {
-                return value;
-            }
-        }
-
-        // Fallback for alternate naming.
-        JsonNode contentNode = root.path("content");
-        if (!contentNode.isMissingNode() && !contentNode.isNull()) {
-            if (contentNode.isTextual()) {
-                String value = contentNode.asText("").trim();
-                if (!value.isBlank()) {
-                    return value;
-                }
-            }
-            if (contentNode.isObject() || contentNode.isArray()) {
-                return contentNode.toString();
-            }
-        }
-
-        // Some model runtimes may place useful output in 'thinking'
-        // while 'response' is empty.
-        JsonNode thinkingNode = root.path("thinking");
-        if (!thinkingNode.isMissingNode() && !thinkingNode.isNull()) {
-            if (thinkingNode.isTextual()) {
-                String value = thinkingNode.asText("").trim();
-                if (!value.isBlank()) {
-                    return value;
-                }
-            }
-            if (thinkingNode.isObject() || thinkingNode.isArray()) {
-                return thinkingNode.toString();
-            }
-        }
-
-        return "";
     }
 
     private List<MCQDTO.CreateRequest> parseGeneratedQuestions(
@@ -1709,7 +1435,7 @@ public class AIService {
         return normalized.length() > 400 ? normalized.substring(0, 400) + "..." : normalized;
     }
 
-    // ── SIMILARITY CHECK ──────────────────────────────────────────
+    // â”€â”€ SIMILARITY CHECK â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     public SimilarityCheckResponse checkSimilarity(
             String questionStem, String optionA, String optionB,
@@ -1743,7 +1469,7 @@ public class AIService {
 
         // Build prompt for similarity scoring
         String prompt = buildSimilarityPrompt(candidate, existing);
-        String rawResponse = callAzureOpenAIAPI(prompt);
+        String rawResponse = callModel(prompt);
         SimilarityCheckResponse aiResult = parseSimilarityResponse(rawResponse, existing);
         return aiResult.isHasSimilar() ? aiResult : deterministic;
     }
@@ -1785,15 +1511,15 @@ public class AIService {
             5. Option structure or answer pattern overlap
 
             DECISION RULE:
-            - Similarity > 30%  → FLAG the pair
-            - Similarity <= 30% → DO NOT include the pair in the output
+            - Similarity > 30%  â†’ FLAG the pair
+            - Similarity <= 30% â†’ DO NOT include the pair in the output
 
             SCORING GUIDANCE:
-            - 0-15   → Clearly different concepts
-            - 16-30  → Related topic but materially different concept/reasoning
-            - 31-50  → Noticeable overlap in concept or reasoning
-            - 51-70  → Strong overlap; likely redundant
-            - 71-100 → Near-duplicate, paraphrase, or same concept with same answer logic
+            - 0-15   â†’ Clearly different concepts
+            - 16-30  â†’ Related topic but materially different concept/reasoning
+            - 31-50  â†’ Noticeable overlap in concept or reasoning
+            - 51-70  â†’ Strong overlap; likely redundant
+            - 71-100 â†’ Near-duplicate, paraphrase, or same concept with same answer logic
 
             CRITICAL INSTRUCTION:
             - Return ONLY question pairs whose similarity is GREATER THAN 30%.
