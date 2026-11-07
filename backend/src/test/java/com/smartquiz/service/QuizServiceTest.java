@@ -30,6 +30,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DisplayName("Quiz Service Auto-Pick Tests")
+// Service methods are guarded by @PreAuthorize; run as an admin unless a test says otherwise.
+@org.springframework.security.test.context.support.WithMockUser(username = "svc.admin", roles = "ADMIN")
 public class QuizServiceTest extends BaseTest {
 
     @Autowired private QuizService quizService;

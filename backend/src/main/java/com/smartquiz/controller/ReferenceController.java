@@ -43,7 +43,8 @@ public class ReferenceController {
 
     @GetMapping("/users")
     public ResponseEntity<?> getAllUsers() {
-        return ResponseEntity.ok(userRepository.findAll().stream().map(u -> {
+        // Participants are quiz takers, not platform users; never list them here.
+        return ResponseEntity.ok(userRepository.findByRoleInOrderByFullNameAsc(List.of(User.Role.SME, User.Role.ADMIN)).stream().map(u -> {
             Map<String, Object> m = new HashMap<>();
             m.put("enterpriseId", u.getEnterpriseId());
             m.put("fullName", u.getFullName());

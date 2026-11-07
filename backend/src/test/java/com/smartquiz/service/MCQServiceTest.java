@@ -28,6 +28,8 @@ import com.smartquiz.entity.User;
 import com.smartquiz.entity.UserStackMapping;
 
 @DisplayName("MCQ Service Tests")
+// Service methods are guarded by @PreAuthorize; run as an admin unless a test says otherwise.
+@org.springframework.security.test.context.support.WithMockUser(username = "svc.admin", roles = "ADMIN")
 public class MCQServiceTest extends BaseTest {
 
     @Autowired private MCQService mcqService;
@@ -293,7 +295,7 @@ public class MCQServiceTest extends BaseTest {
     @DisplayName("Assign reviewer moves question to UNDER_REVIEW")
     void assignReviewer_movesToUnderReview() {
         MCQ mcq = createMCQ(sme, stack, topic, MCQ.Status.READY_FOR_REVIEW);
-        MCQDTO.Response r = mcqService.assignReviewer(mcq.getQuestionId(), reviewer.getEnterpriseId());
+        MCQDTO.Response r = mcqService.assignReviewer(mcq.getQuestionId(), reviewer.getEnterpriseId(), admin.getEnterpriseId());
         assertThat(r.getStatus()).isEqualTo("UNDER_REVIEW");
         assertThat(r.getReviewerEnterpriseId()).isEqualTo(reviewer.getEnterpriseId());
     }

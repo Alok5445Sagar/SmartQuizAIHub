@@ -1,5 +1,7 @@
 package com.smartquiz.service;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+
 import com.smartquiz.exception.NotFoundException;
 import com.smartquiz.exception.ForbiddenException;
 import com.smartquiz.exception.ConflictException;
@@ -37,6 +39,8 @@ public class MCQService {
     @Autowired @org.springframework.context.annotation.Lazy private AIService aiService;
 
     private static final Set<String> SUPPORTED_LANGUAGE_CODES = Set.of("en", "es", "fr", "ro");
+
+    @PreAuthorize("hasAnyRole('SME','ADMIN')")
 
     public MCQDTO.Response createMCQ(String creatorId, MCQDTO.CreateRequest req) {
         User creator = userRepository.findByEnterpriseId(creatorId).orElseThrow(() -> new NotFoundException("User not found"));
@@ -84,6 +88,8 @@ public class MCQService {
         
         return MCQDTO.Response.fromEntity(mcqRepository.save(mcq));
     }
+
+    @PreAuthorize("hasAnyRole('SME','ADMIN')")
 
     public MCQDTO.Response updateMCQ(String updaterId, Long questionId, MCQDTO.UpdateRequest req, boolean isAdmin) {
         MCQ mcq = mcqRepository.findById(questionId).orElseThrow(() -> new NotFoundException("Question not found"));
@@ -158,6 +164,8 @@ public class MCQService {
         return MCQDTO.Response.fromEntity(mcqRepository.save(mcq));
     }
 
+    @PreAuthorize("hasAnyRole('SME','ADMIN')")
+
     public void deleteMCQ(String requesterId, Long questionId, boolean isAdmin) {
         MCQ mcq = mcqRepository.findById(questionId).orElseThrow(() -> new NotFoundException("Question not found"));
 
@@ -211,6 +219,8 @@ public class MCQService {
         return mapWithTranslations(mcqs, languageCode);
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
+
     public Page<MCQDTO.Response> getAllMCQs(
             int page, int size,
             Long stackId, Long topicId, String difficulty, String status, String search, String languageCode) {
@@ -235,11 +245,15 @@ public class MCQService {
         return mapWithTranslations(mcqs, languageCode);
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
+
     public Page<MCQDTO.Response> getAllMCQs(
             int page, int size,
             Long stackId, Long topicId, String difficulty, String status, String search) {
         return getAllMCQs(page, size, stackId, topicId, difficulty, status, search, "en");
     }
+
+    @PreAuthorize("hasRole('ADMIN')")
 
     public Map<String, Long> getQuestionBankStats(
             Long stackId, Long topicId, String difficulty, String search) {
@@ -317,6 +331,8 @@ public class MCQService {
         return new MCQDTO.TranslationListResponse(questionId, rows);
     }
 
+    @PreAuthorize("hasAnyRole('SME','ADMIN')")
+
     public MCQDTO.TranslationRequest suggestTranslation(Long questionId, String languageCode) {
         MCQ mcq = mcqRepository.findById(questionId).orElseThrow(() -> new NotFoundException("Question not found"));
         String normalizedLanguage = normalizeLanguageCode(languageCode);
@@ -351,6 +367,8 @@ public class MCQService {
         );
     }
 
+    @PreAuthorize("hasAnyRole('SME','ADMIN')")
+
     public MCQDTO.TranslationResponse saveTranslation(String translatorEnterpriseId, Long questionId, MCQDTO.TranslationRequest request) {
         if (request == null) {
             throw new BusinessRuleException("Translation request is required");
@@ -358,6 +376,10 @@ public class MCQService {
         MCQ mcq = mcqRepository.findById(questionId).orElseThrow(() -> new NotFoundException("Question not found"));
         User translator = userRepository.findByEnterpriseId(translatorEnterpriseId)
             .orElseThrow(() -> new NotFoundException("User not found"));
+        if (translator.getRole() != User.Role.ADMIN
+                && !mcq.getCreator().getEnterpriseId().equals(translator.getEnterpriseId())) {
+            throw new ForbiddenException("Only the question's creator or an admin can save translations");
+        }
         String normalizedLanguage = normalizeLanguageCode(request.getLanguageCode());
         if ("en".equals(normalizedLanguage)) {
             throw new BusinessRuleException("English is the source language and cannot be saved as translation");
@@ -425,38 +447,69 @@ public class MCQService {
         return result;
     }
 
-    public MCQDTO.Response assignReviewer(Long questionId, String reviewerEnterpriseId) {
+    /**
+     * Assigns a reviewer. Allowed for READY_FOR_REVIEW questions, or for a DRAFT the requesting admin created.
+     * The reviewer must be eligible: an active SME mapped to the question's stack, or an active admin,
+     * and never the question's creator.
+     */
+    @PreAuthorize("hasRole('ADMIN')")
+    public MCQDTO.Response assignReviewer(Long questionId, String reviewerEnterpriseId, String requesterEnterpriseId) {
         MCQ mcq = mcqRepository.findById(questionId).orElseThrow(() -> new NotFoundException("Question not found"));
-        User reviewer = userRepository.findByEnterpriseId(reviewerEnterpriseId).orElseThrow(() -> new NotFoundException("User not found"));
+        String creatorId = mcq.getCreator().getEnterpriseId();
+        boolean readyForReview = mcq.getStatus() == MCQ.Status.READY_FOR_REVIEW;
+        boolean ownDraft = mcq.getStatus() == MCQ.Status.DRAFT && creatorId.equals(requesterEnterpriseId);
+        if (!readyForReview && !ownDraft) {
+            throw new ConflictException("A reviewer can only be assigned to a question that is READY_FOR_REVIEW");
+        }
+
+        User reviewer = userRepository.findByEnterpriseId(reviewerEnterpriseId)
+                .orElseThrow(() -> new NotFoundException("Reviewer not found"));
+        boolean eligible = getReviewers(mcq.getStack().getStackId(), creatorId).stream()
+                .anyMatch(r -> reviewer.getEnterpriseId().equals(r.get("enterpriseId")));
+        if (!eligible) {
+            throw new BusinessRuleException("Reviewer is not eligible for this question's stack");
+        }
+
         mcq.setReviewer(reviewer);
         mcq.setStatus(MCQ.Status.UNDER_REVIEW);
         return MCQDTO.Response.fromEntity(mcqRepository.save(mcq));
     }
 
+    @PreAuthorize("hasAnyRole('SME','ADMIN')")
     public MCQDTO.Response reviewMCQ(String reviewerId, Long questionId, MCQDTO.ReviewRequest req) {
         MCQ mcq = mcqRepository.findById(questionId).orElseThrow(() -> new NotFoundException("Question not found"));
+        if (mcq.getStatus() != MCQ.Status.UNDER_REVIEW || mcq.getReviewer() == null) {
+            throw new ConflictException("Only questions UNDER_REVIEW with an assigned reviewer can be reviewed");
+        }
         if (!mcq.getReviewer().getEnterpriseId().equals(reviewerId)) {
             throw new ForbiddenException("Not authorized to review this MCQ");
         }
 
+        String comments = req.getComments() == null || req.getComments().isBlank() ? null : req.getComments().trim();
         if ("APPROVE".equals(req.getAction())) {
             mcq.setStatus(MCQ.Status.APPROVED);
         } else if ("REJECT".equals(req.getAction())) {
-            if (req.getComments() == null || req.getComments().isBlank()) {
+            if (comments == null) {
                 throw new BusinessRuleException("Comments are mandatory for rejection");
             }
             mcq.setStatus(MCQ.Status.REJECTED);
-            mcq.setReviewerComments(req.getComments());
+        } else {
+            throw new BusinessRuleException("Action must be APPROVE or REJECT");
         }
+        mcq.setReviewerComments(comments);
 
         return MCQDTO.Response.fromEntity(mcqRepository.save(mcq));
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
     public List<Map<String, Object>> getReviewers(Long stackId, String excludeEnterpriseId) {
-        List<User> users = userStackMappingRepository.findUsersByStackIdExcluding(stackId, excludeEnterpriseId);
+        List<User> users = userStackMappingRepository.findUsersByStackIdExcluding(stackId, excludeEnterpriseId).stream()
+                .filter(User::isActive)
+                .filter(u -> u.getRole() == User.Role.SME || u.getRole() == User.Role.ADMIN)
+                .collect(Collectors.toList());
         // Also add admins
-        List<User> admins = userRepository.findAll().stream()
-                .filter(u -> u.getRole() == User.Role.ADMIN && !u.getEnterpriseId().equals(excludeEnterpriseId))
+        List<User> admins = userRepository.findByRoleInOrderByFullNameAsc(List.of(User.Role.ADMIN)).stream()
+                .filter(u -> u.isActive() && !u.getEnterpriseId().equals(excludeEnterpriseId))
                 .collect(Collectors.toList());
         
         Set<String> seen = new HashSet<>();
@@ -482,6 +535,8 @@ public class MCQService {
         }
         return result;
     }
+
+    @PreAuthorize("hasAnyRole('SME','ADMIN')")
 
     public List<MCQDTO.Response> bulkUpload(String creatorId, MultipartFile file) throws IOException {
     User creator = userRepository.findByEnterpriseId(creatorId).orElseThrow(() -> new NotFoundException("User not found"));

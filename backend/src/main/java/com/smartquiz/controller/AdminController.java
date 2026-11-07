@@ -47,8 +47,9 @@ public class AdminController {
 
     @PostMapping("/assign-reviewer/{questionId}")
     public ResponseEntity<?> assignReviewer(@PathVariable Long questionId,
-                                             @jakarta.validation.Valid @RequestBody MCQDTO.AssignReviewerRequest req) {
-        return ResponseEntity.ok(mcqService.assignReviewer(questionId, req.getReviewerEnterpriseId()));
+                                             @jakarta.validation.Valid @RequestBody MCQDTO.AssignReviewerRequest req,
+                                             org.springframework.security.core.Authentication authentication) {
+        return ResponseEntity.ok(mcqService.assignReviewer(questionId, req.getReviewerEnterpriseId(), authentication.getName()));
     }
 
     @GetMapping("/reviewers/{stackId}")

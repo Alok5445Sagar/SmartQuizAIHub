@@ -1,5 +1,7 @@
 package com.smartquiz.service;
 
+import org.springframework.security.access.prepost.PreAuthorize;
+
 import com.smartquiz.exception.NotFoundException;
 import com.smartquiz.exception.ConflictException;
 import com.smartquiz.exception.BusinessRuleException;
@@ -64,6 +66,8 @@ public class QuizService {
         return getApprovedQuestionsByFilters(Collections.emptyList(), Collections.singletonList(topicId));
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
+
     public List<QuizDTO.QuestionChoice> getApprovedQuestionsByFilters(List<Long> stackIds, List<Long> topicIds) {
         List<Long> safeStackIds = stackIds == null ? Collections.emptyList() : stackIds.stream().filter(Objects::nonNull).distinct().collect(Collectors.toList());
         List<Long> safeTopicIds = topicIds == null ? Collections.emptyList() : topicIds.stream().filter(Objects::nonNull).distinct().collect(Collectors.toList());
@@ -82,6 +86,8 @@ public class QuizService {
                 .map(QuizDTO.QuestionChoice::from)
                 .collect(Collectors.toList());
     }
+
+    @PreAuthorize("hasRole('ADMIN')")
 
     public QuizDTO.AutoPickResponse autoPickQuestions(QuizDTO.AutoPickRequest request) {
         if (request == null) {
@@ -254,6 +260,7 @@ public class QuizService {
     }
 
     @Transactional
+    @PreAuthorize("hasRole('ADMIN')")
     public QuizDTO.PublishedQuizSummary publishQuiz(String adminEnterpriseId, QuizDTO.PublishRequest request) {
         if (request.getQuestionIds() == null || request.getQuestionIds().isEmpty()) {
             throw new BusinessRuleException("Please select quiz questions");
@@ -333,6 +340,8 @@ public class QuizService {
         return QuizDTO.PublishedQuizSummary.from(savedQuiz, buildQuizLink(savedQuiz.getQuizCode()), quizQuestions.size(), savedQuiz.getDurationMinutes());
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
+
     public Page<QuizDTO.PublishedQuizSummary> getPublishedQuizzes(int page, int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "publishedAt"));
         return quizRepository.findAllByOrderByPublishedAtDesc(pageable)
@@ -343,6 +352,7 @@ public class QuizService {
     }
 
     @Transactional
+    @PreAuthorize("hasRole('ADMIN')")
     public QuizDTO.PublishedQuizSummary closeQuiz(Long quizId) {
         Quiz quiz = quizRepository.findById(quizId).orElseThrow(() -> new NotFoundException("Quiz not found"));
         if (quiz.getStatus() == Quiz.Status.CLOSED) {
@@ -356,6 +366,7 @@ public class QuizService {
     }
 
     @Transactional
+    @PreAuthorize("hasRole('ADMIN')")
     public QuizDTO.PublishedQuizSummary reopenQuiz(Long quizId) {
         Quiz quiz = quizRepository.findById(quizId).orElseThrow(() -> new NotFoundException("Quiz not found"));
         if (quiz.getStatus() == Quiz.Status.PUBLISHED) {
@@ -370,6 +381,7 @@ public class QuizService {
     }
 
     @Transactional
+    @PreAuthorize("hasRole('ADMIN')")
     public QuizDTO.PublishedQuizSummary rehostClosedQuiz(String adminEnterpriseId, Long quizId) {
         Quiz closedQuiz = quizRepository.findById(quizId).orElseThrow(() -> new NotFoundException("Quiz not found"));
         if (closedQuiz.getStatus() != Quiz.Status.CLOSED) {
@@ -409,6 +421,7 @@ public class QuizService {
         return QuizDTO.PublishedQuizSummary.from(savedQuiz, buildQuizLink(savedQuiz.getQuizCode()), clonedQuestions.size(), savedQuiz.getDurationMinutes());
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
     public byte[] exportLeaderboardExcel(Long quizId) {
         Quiz quiz = quizRepository.findById(quizId).orElseThrow(() -> new NotFoundException("Quiz not found"));
         List<QuizAttempt> attempts = quizAttemptRepository.findLeaderboardByQuiz(quiz);
@@ -947,6 +960,8 @@ public class QuizService {
         );
     }
 
+            @PreAuthorize("hasRole('ADMIN')")
+
             public QuizDTO.TopicLeaderboardResponse getTopicLeaderboard(Long topicId, String participantType) {
             Topic topic = topicRepository.findById(topicId)
                 .orElseThrow(() -> new NotFoundException("Topic not found"));
@@ -996,6 +1011,8 @@ public class QuizService {
             );
             }
 
+            @PreAuthorize("hasRole('ADMIN')")
+
             public QuizDTO.OverallLeaderboardResponse getOverallLeaderboard(String participantType) {
             String normalizedType = normalizeParticipantTypeOrAll(participantType);
 
@@ -1030,6 +1047,8 @@ public class QuizService {
             return new QuizDTO.OverallLeaderboardResponse(normalizedType, rows.size(), rows);
             }
 
+    @PreAuthorize("hasRole('ADMIN')")
+
     public List<QuizDTO.HostedTopicOption> getHostedTopicsForLeaderboard() {
         Map<Long, TopicHostedAggregate> hostedByTopic = new HashMap<>();
 
@@ -1057,6 +1076,8 @@ public class QuizService {
             .map(item -> new QuizDTO.HostedTopicOption(item.topicId, item.stackName, item.topicName, item.quizzesHosted))
             .collect(Collectors.toList());
     }
+
+    @PreAuthorize("hasRole('ADMIN')")
 
     public QuizDTO.ParticipantTopicAnalyticsResponse getParticipantTopicAnalytics(String participantType) {
         String normalizedType = normalizeParticipantTypeOrAll(participantType);

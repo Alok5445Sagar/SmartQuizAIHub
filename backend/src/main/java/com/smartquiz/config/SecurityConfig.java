@@ -19,6 +19,11 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+import jakarta.servlet.DispatcherType;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.http.MediaType;
+
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 
@@ -54,22 +59,35 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .exceptionHandling(ex -> ex
-            .authenticationEntryPoint((request, response, authException) -> {
-                response.setStatus(jakarta.servlet.http.HttpServletResponse.SC_UNAUTHORIZED);
-                response.setContentType("application/json");
-                response.getWriter().write("{\"error\": \"Unauthorized\"}");
-            })
-        )
-        .authorizeHttpRequests(auth -> auth
-            .requestMatchers("/api/auth/**").permitAll()
-            .requestMatchers("/api/public/quiz/**").permitAll()
-            .requestMatchers("/api/admin/**").hasRole("ADMIN")
-            .requestMatchers("/api/ai/**").authenticated()
-            .anyRequest().authenticated()
-        )
+                .authenticationEntryPoint((request, response, authException) ->
+                    writeProblem(response, HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized",
+                        "Authentication is required", request.getRequestURI()))
+                .accessDeniedHandler((request, response, deniedException) ->
+                    writeProblem(response, HttpServletResponse.SC_FORBIDDEN, "Forbidden",
+                        "You do not have permission to perform this action", request.getRequestURI()))
+            )
+            .authorizeHttpRequests(auth -> auth
+                // Re-dispatches (SSE completion, error pages) were already authorized on the original request.
+                .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
+                .requestMatchers("/api/auth/login").permitAll()
+                .requestMatchers("/api/public/quiz/**").permitAll()
+                .requestMatchers("/api/auth/**").authenticated()
+                .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                .requestMatchers("/api/mcq/**", "/api/ai/**", "/api/reference/**").hasAnyRole("SME", "ADMIN")
+                .anyRequest().authenticated()
+            )
         .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
+    }
+
+    private static void writeProblem(HttpServletResponse response, int status, String title,
+                                     String detail, String instance) throws IOException {
+        response.setStatus(status);
+        response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+        response.getWriter().write("{\"type\":\"about:blank\",\"title\":\"" + title + "\",\"status\":" + status
+                + ",\"detail\":\"" + detail + "\",\"message\":\"" + detail + "\",\"instance\":\""
+                + instance.replace("\\", "\\\\").replace("\"", "\\\"") + "\"}");
     }
 
     @Bean
