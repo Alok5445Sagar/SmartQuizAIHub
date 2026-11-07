@@ -9,6 +9,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,6 +61,10 @@ public class AIController {
     @Autowired private TopicRepository topicRepository;
     @Autowired private UserRepository userRepository;
         @Autowired private ChatMemoryService chatMemoryService;
+        @Autowired @org.springframework.beans.factory.annotation.Qualifier("chatStreamExecutor")
+        private org.springframework.core.task.TaskExecutor chatStreamExecutor;
+        @org.springframework.beans.factory.annotation.Value("${app.ai.stream-timeout:330s}")
+        private java.time.Duration streamTimeout;
 
     @PostMapping("/generate")
     public ResponseEntity<?> generateQuestions(
@@ -222,12 +227,17 @@ public class AIController {
                 return ResponseEntity.ok(chatMemoryService.getRecentSessions(auth.getName(), limit));
         }
 
+        /**
+         * Streams the assistant's answer token by token (SSE events: "message" deltas, then "done",
+         * or "error" with {"message": ...}). The user message is saved before streaming starts; the assistant
+         * message when it completes. If the stream breaks after some tokens, the partial answer is saved with a marker.
+         */
         @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
         public SseEmitter chatStream(
                         @Valid @RequestBody ChatRequest req,
                         Authentication auth) {
 
-                SseEmitter emitter = new SseEmitter(120000L);
+                SseEmitter emitter = new SseEmitter(streamTimeout.toMillis());
 
                 if (auth == null || auth.getName() == null || auth.getName().isBlank()) {
                         emitter.completeWithError(new UnauthorizedException("Unauthorized"));
@@ -236,50 +246,77 @@ public class AIController {
 
                 User user = userRepository.findByEnterpriseId(auth.getName())
                                 .orElseThrow(() -> new NotFoundException("User not found"));
+                String enterpriseId = user.getEnterpriseId();
+                String assistantRole = user.getRole() == User.Role.ADMIN ? "ADMIN" : "SME";
+                String sessionId = chatMemoryService.resolveSessionId(enterpriseId, req.getSessionId());
 
-                String sessionId = chatMemoryService.resolveSessionId(user.getEnterpriseId(), req.getSessionId());
+                AtomicBoolean cancelled = new AtomicBoolean(false);
+                emitter.onCompletion(() -> cancelled.set(true));
+                emitter.onTimeout(() -> cancelled.set(true));
+                emitter.onError(ex -> cancelled.set(true));
 
-                new Thread(() -> {
-                        try {
-                                List<ChatRequest.ChatMessage> history = req.getHistory();
-                                if (history == null || history.isEmpty()) {
-                                        history = chatMemoryService.getRecentHistoryForPrompt(user.getEnterpriseId(), sessionId, 10);
-                                }
-
-                                String answer = aiService.answerGeneralQuery(
-                                                req.getMessage(),
-                                                history,
-                                                user.getEnterpriseId(),
-                                                user.getRole() == User.Role.ADMIN ? "ADMIN" : "SME");
-
-                                chatMemoryService.saveUserMessage(user.getEnterpriseId(), sessionId, req.getMessage());
-                                chatMemoryService.saveAssistantMessage(user.getEnterpriseId(), sessionId, answer);
-
-                                int chunkSize = 24;
-                                for (int i = 0; i < answer.length(); i += chunkSize) {
-                                        int end = Math.min(i + chunkSize, answer.length());
-                                        String delta = answer.substring(i, end);
-                                        emitter.send(SseEmitter.event()
-                                                        .name("message")
-                                                        .data(new ChatStreamResponse(delta, false)));
-                                        Thread.sleep(25);
-                                }
-
-                                emitter.send(SseEmitter.event()
-                                                .name("done")
-                                                .data(new ChatStreamResponse("", true)));
-                                emitter.complete();
-                        } catch (Exception ex) {
-                                try {
-                                        emitter.completeWithError(ex);
-                                } catch (Exception ignored) {
-                                }
-                        }
-                }).start();
-
+                try {
+                        chatStreamExecutor.execute(() -> runChatStream(emitter, cancelled, req, enterpriseId, sessionId, assistantRole));
+                } catch (org.springframework.core.task.TaskRejectedException ex) {
+                        sendStreamError(emitter, "Too many chat streams are open right now. Please try again shortly.");
+                }
                 return emitter;
         }
 
+        private void runChatStream(SseEmitter emitter, AtomicBoolean cancelled, ChatRequest req,
+                                   String enterpriseId, String sessionId, String assistantRole) {
+                List<ChatRequest.ChatMessage> history = req.getHistory();
+                if (history == null || history.isEmpty()) {
+                        history = chatMemoryService.getRecentHistoryForPrompt(enterpriseId, sessionId, 10);
+                }
+                chatMemoryService.saveUserMessage(enterpriseId, sessionId, req.getMessage());
+
+                try {
+                        String answer = aiService.streamGeneralQuery(
+                                        req.getMessage(), history, enterpriseId, assistantRole,
+                                        delta -> sendDelta(emitter, cancelled, delta),
+                                        cancelled::get);
+                        chatMemoryService.saveAssistantMessage(enterpriseId, sessionId, answer);
+                        emitter.send(SseEmitter.event().name("done").data(new ChatStreamResponse("", true)));
+                        emitter.complete();
+                } catch (AIService.StreamCancelledException ex) {
+                        // Client disconnected: keep what was generated so the session history stays coherent.
+                        if (!ex.getPartialAnswer().isBlank()) {
+                                chatMemoryService.saveAssistantMessage(enterpriseId, sessionId, ex.getPartialAnswer() + INTERRUPTED_MARKER);
+                        }
+                        log.debug("Chat stream for {} cancelled by client", enterpriseId);
+                } catch (AIService.StreamInterruptedException ex) {
+                        chatMemoryService.saveAssistantMessage(enterpriseId, sessionId, ex.getPartialAnswer() + INTERRUPTED_MARKER);
+                        sendStreamError(emitter, "The AI response was interrupted. Please try again.");
+                } catch (Exception ex) {
+                        log.warn("Chat stream failed for {}: {}", enterpriseId, ex.getMessage());
+                        sendStreamError(emitter, ex instanceof com.smartquiz.exception.ApiException
+                                        ? ex.getMessage() : "The AI assistant could not answer right now.");
+                }
+        }
+
+        static final String INTERRUPTED_MARKER = "\n\n[Response interrupted]";
+
+        private void sendDelta(SseEmitter emitter, AtomicBoolean cancelled, String delta) {
+                if (cancelled.get()) {
+                        return;
+                }
+                try {
+                        emitter.send(SseEmitter.event().name("message").data(new ChatStreamResponse(delta, false)));
+                } catch (Exception ex) {
+                        // Client is gone; stop pulling tokens from the model.
+                        cancelled.set(true);
+                }
+        }
+
+        private void sendStreamError(SseEmitter emitter, String message) {
+                try {
+                        emitter.send(SseEmitter.event().name("error").data(Map.of("message", message)));
+                        emitter.complete();
+                } catch (Exception ignored) {
+                        emitter.completeWithError(new IllegalStateException(message));
+                }
+        }
         @GetMapping("/chat/suggestions")
         public ResponseEntity<Map<String, Object>> getChatSuggestions(Authentication auth) {
                 if (auth == null || auth.getName() == null || auth.getName().isBlank()) {

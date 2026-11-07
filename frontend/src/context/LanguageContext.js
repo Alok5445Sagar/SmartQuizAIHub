@@ -19,6 +19,7 @@ const readStoredUserPreferredLanguage = () => {
 
 const translations = {
   en: {
+    chatResponseInterrupted: 'Response interrupted',
     language: 'Language',
     addQuestion: 'Add Question',
     generateWithAI: 'Generate with AI',
@@ -551,6 +552,7 @@ const translations = {
     bulkUploadFailed: 'Bulk upload failed',
   },
   es: {
+    chatResponseInterrupted: 'Respuesta interrumpida',
     language: 'Idioma',
     addQuestion: 'Agregar pregunta',
     generateWithAI: 'Generar con IA',
@@ -895,6 +897,7 @@ const translations = {
     learnersBelow50: 'Participantes por debajo del 50%',
   },
   fr: {
+    chatResponseInterrupted: 'Reponse interrompue',
     language: 'Langue',
     addQuestion: 'Ajouter une question',
     generateWithAI: 'Generer avec IA',
@@ -1168,6 +1171,7 @@ const translations = {
     reviewFailed: 'Echec de la revision',
   },
   ro: {
+    chatResponseInterrupted: 'Raspuns intrerupt',
     language: 'Limba',
     addQuestion: 'Adauga intrebare',
     generateWithAI: 'Genereaza cu AI',

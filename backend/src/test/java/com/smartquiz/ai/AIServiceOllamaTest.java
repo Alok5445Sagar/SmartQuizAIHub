@@ -237,6 +237,63 @@ class AIServiceOllamaTest {
         Mockito.verify(chatModel, Mockito.never()).call(any(Prompt.class));
     }
 
+    private static ChatResponse chunk(String text) {
+        return new ChatResponse(List.of(new Generation(new AssistantMessage(text))));
+    }
+
+    @Test
+    @DisplayName("streaming chat relays each model chunk in order and returns the full answer")
+    void streamChat_relaysChunksInOrder() {
+        when(chatModel.stream(any(Prompt.class)))
+                .thenReturn(reactor.core.publisher.Flux.just(chunk("Java "), chunk("streams "), chunk("are lazy.")));
+        List<String> deltas = new java.util.ArrayList<>();
+
+        String answer = aiService.streamGeneralQuery("What are streams?", List.of(), "sme", "SME", deltas::add, () -> false);
+
+        assertThat(deltas).containsExactly("Java ", "streams ", "are lazy.");
+        assertThat(answer).isEqualTo("Java streams are lazy.");
+    }
+
+    @Test
+    @DisplayName("streaming chat stops pulling tokens once the client cancels")
+    void streamChat_stopsWhenCancelled() {
+        when(chatModel.stream(any(Prompt.class)))
+                .thenReturn(reactor.core.publisher.Flux.just(chunk("one "), chunk("two "), chunk("three ")));
+        List<String> deltas = new java.util.ArrayList<>();
+        java.util.concurrent.atomic.AtomicBoolean cancelled = new java.util.concurrent.atomic.AtomicBoolean();
+
+        assertThatThrownBy(() -> aiService.streamGeneralQuery("Count", List.of(), "sme", "SME",
+                d -> { deltas.add(d); cancelled.set(true); }, cancelled::get))
+                .isInstanceOfSatisfying(AIService.StreamCancelledException.class,
+                        ex -> assertThat(ex.getPartialAnswer()).isEqualTo("one "));
+        assertThat(deltas).containsExactly("one ");
+    }
+
+    @Test
+    @DisplayName("a failure after some tokens surfaces the partial answer")
+    void streamChat_failureMidStream() {
+        when(chatModel.stream(any(Prompt.class))).thenReturn(reactor.core.publisher.Flux.concat(
+                reactor.core.publisher.Flux.just(chunk("Partial ")),
+                reactor.core.publisher.Flux.error(new RuntimeException("connection reset by peer"))));
+
+        assertThatThrownBy(() -> aiService.streamGeneralQuery("Q", List.of(), "sme", "SME", d -> { }, () -> false))
+                .isInstanceOfSatisfying(AIService.StreamInterruptedException.class,
+                        ex -> assertThat(ex.getPartialAnswer()).isEqualTo("Partial "));
+    }
+
+    @Test
+    @DisplayName("when Ollama is down before any token, the offline fallback is streamed as one delta")
+    void streamChat_fallbackWhenDown() {
+        when(chatModel.stream(any(Prompt.class)))
+                .thenReturn(reactor.core.publisher.Flux.error(new RuntimeException("Connection refused")));
+        List<String> deltas = new java.util.ArrayList<>();
+
+        String answer = aiService.streamGeneralQuery("Explain Java streams", List.of(), "sme", "SME", deltas::add, () -> false);
+
+        assertThat(answer).contains("[Fallback mode]");
+        assertThat(deltas).containsExactly(answer);
+    }
+
     @Test
     @DisplayName("chat falls back to offline guidance when Ollama is down")
     void chat_fallsBackWhenOllamaDown() {

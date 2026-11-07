@@ -253,6 +253,7 @@ export const aiAPI = {
     const decoder = new TextDecoder();
     const reader = response.body.getReader();
     let buffer = '';
+    let receivedDelta = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -266,21 +267,32 @@ export const aiAPI = {
 
       for (const rawEvent of events) {
         const lines = rawEvent.split('\n');
+        const eventLine = lines.find((line) => line.startsWith('event:'));
+        const eventName = eventLine ? eventLine.slice(6).trim() : 'message';
         const dataLine = lines.find((line) => line.startsWith('data:'));
         if (!dataLine) continue;
 
         const payloadText = dataLine.slice(5).trim();
         if (!payloadText) continue;
 
+        let payload;
         try {
-          const payload = JSON.parse(payloadText);
-          if (payload.done) {
-            handlers.onDone?.();
-          } else if (payload.delta) {
-            handlers.onDelta?.(payload.delta);
-          }
+          payload = JSON.parse(payloadText);
         } catch {
-          // Ignore malformed event payloads.
+          payload = { message: payloadText };
+        }
+
+        if (eventName === 'error') {
+          // `partial` tells the caller whether some of the answer was already shown (and saved server-side).
+          const streamError = new Error(payload?.message || 'The AI response was interrupted.');
+          streamError.partial = receivedDelta;
+          throw streamError;
+        }
+        if (payload?.done) {
+          handlers.onDone?.();
+        } else if (payload?.delta) {
+          receivedDelta = true;
+          handlers.onDelta?.(payload.delta);
         }
       }
     }

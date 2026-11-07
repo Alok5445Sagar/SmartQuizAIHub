@@ -292,8 +292,20 @@ export default function ChatAssistantWidget() {
             },
           }
         );
-      } catch {
-        // Stream can fail due proxies/network; fallback to non-stream API.
+      } catch (streamError) {
+        if (streamed || streamError?.partial) {
+          // Part of the answer already arrived (and was saved server-side): keep it, flag the interruption.
+          streamed = true;
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMessageId
+                ? { ...msg, content: `${msg.content || ''}\n\n_(${t('chatResponseInterrupted')})_` }
+                : msg
+            )
+          );
+          toast.error(streamError?.message || t('chatResponseInterrupted'));
+        }
+        // Otherwise nothing was streamed (proxy/network problem): fall back to the non-stream API below.
       }
 
       if (!streamed) {

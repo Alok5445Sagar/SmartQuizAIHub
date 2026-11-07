@@ -31,7 +31,7 @@ public class OllamaHealthIndicator implements HealthIndicator {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
 
-    public OllamaHealthIndicator(@Value("${spring.ai.ollama.base-url:http://localhost:11434}") String baseUrl,
+    public OllamaHealthIndicator(@Value("${spring.ai.ollama.base-url:http://127.0.0.1:11434}") String baseUrl,
                                  @Value("${app.ai.model:qwen2.5:3b}") String model,
                                  AiCallGuard aiCallGuard,
                                  ObjectMapper objectMapper) {

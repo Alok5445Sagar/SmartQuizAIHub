@@ -217,6 +217,44 @@ describe('aiAPI', () => {
     expect(onDelta).toHaveBeenCalledWith('Hello');
     expect(onDone).toHaveBeenCalled();
   });
+
+  const mockStream = (chunks) => {
+    const { TextEncoder, TextDecoder } = require('util');
+    global.TextEncoder = TextEncoder;
+    global.TextDecoder = TextDecoder;
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      body: {
+        getReader: () => {
+          let index = 0;
+          return {
+            read: async () => (index >= chunks.length
+              ? { done: true, value: undefined }
+              : { done: false, value: new TextEncoder().encode(chunks[index++]) }),
+          };
+        },
+      },
+    });
+  };
+
+  test('streamChat throws on an error event and marks it partial after deltas', async () => {
+    mockStream([
+      'event:message\ndata:{"delta":"Part","done":false}\n\n',
+      'event:error\ndata:{"message":"The AI response was interrupted."}\n\n',
+    ]);
+    const onDelta = jest.fn();
+
+    await expect(aiAPI.streamChat({ message: 'Hi' }, { onDelta })).rejects.toMatchObject({
+      message: 'The AI response was interrupted.',
+      partial: true,
+    });
+    expect(onDelta).toHaveBeenCalledWith('Part');
+  });
+
+  test('streamChat error before any delta is not partial (caller may fall back)', async () => {
+    mockStream(['event:error\ndata:{"message":"Too many chat streams"}\n\n']);
+    await expect(aiAPI.streamChat({ message: 'Hi' }, {})).rejects.toMatchObject({ partial: false });
+  });
 });
 
 describe('quizPublicAPI credentials', () => {

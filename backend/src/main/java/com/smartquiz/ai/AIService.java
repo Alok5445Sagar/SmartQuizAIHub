@@ -239,27 +239,25 @@ public class AIService {
         return screened;
     }
 
-    public String answerGeneralQuery(String question, List<ChatRequest.ChatMessage> history, String userId, String assistantRole) {
+    /** System prompt, user prompt and the cleaned question for one chat turn. */
+    private record ChatPrompt(String system, String user, String question) {
+    }
+
+    private ChatPrompt buildChatPrompt(String question, List<ChatRequest.ChatMessage> history, String userId, String assistantRole) {
         String sanitizedQuestion = question == null ? "" : question.trim().replaceAll("\\s+", " ");
         if (sanitizedQuestion.isBlank()) {
             throw new BusinessRuleException("Question cannot be empty.");
         }
-
         if (sanitizedQuestion.length() > 2000) {
             sanitizedQuestion = sanitizedQuestion.substring(0, 2000);
         }
 
-        String systemPrompt = buildRoleAwareSystemPrompt(assistantRole);
-
         List<ChatRequest.ChatMessage> safeHistory = history == null ? Collections.emptyList() : history;
         List<ChatRequest.ChatMessage> trimmedHistory = safeHistory.stream()
                 .filter(m -> m != null && !isBlank(m.getRole()) && !isBlank(m.getContent()))
-                .map(m -> new ChatRequest.ChatMessage(
-                        normalizeRole(m.getRole()),
-                        trimToLength(m.getContent(), 800)))
+                .map(m -> new ChatRequest.ChatMessage(normalizeRole(m.getRole()), trimToLength(m.getContent(), 800)))
                 .filter(m -> "user".equals(m.getRole()) || "assistant".equals(m.getRole()))
                 .collect(Collectors.toList());
-
         if (trimmedHistory.size() > 8) {
             trimmedHistory = trimmedHistory.subList(trimmedHistory.size() - 8, trimmedHistory.size());
         }
@@ -268,33 +266,123 @@ public class AIService {
         if (!isBlank(userId)) {
             userPrompt.append("User: ").append(trimToLength(userId, 120)).append("\n\n");
         }
-
         if (!trimmedHistory.isEmpty()) {
             userPrompt.append("Conversation so far:\n");
             for (ChatRequest.ChatMessage msg : trimmedHistory) {
-                userPrompt.append(msg.getRole())
-                        .append(": ")
-                        .append(msg.getContent().trim().replaceAll("\\s+", " "))
-                        .append("\n");
+                userPrompt.append(msg.getRole()).append(": ")
+                        .append(msg.getContent().trim().replaceAll("\\s+", " ")).append("\n");
             }
             userPrompt.append("\n");
         }
-
         userPrompt.append("Current user query: ").append(sanitizedQuestion);
+        return new ChatPrompt(buildRoleAwareSystemPrompt(assistantRole), userPrompt.toString(), sanitizedQuestion);
+    }
 
+    private int chatMaxTokens() {
+        return Math.min(700, Math.max(256, maxOutputTokens));
+    }
+
+    public String answerGeneralQuery(String question, List<ChatRequest.ChatMessage> history, String userId, String assistantRole) {
+        ChatPrompt prompt = buildChatPrompt(question, history, userId, assistantRole);
         try {
-            String answer = callAssistantChat(
-                    systemPrompt,
-                    userPrompt.toString(),
-                    Math.min(700, Math.max(256, maxOutputTokens)),
-                    0.4d);
+            String answer = callAssistantChat(prompt.system(), prompt.user(), chatMaxTokens(), 0.4d);
             return stripCodeFences(trimToLength(answer, 4000));
         } catch (RuntimeException ex) {
             log.warn("General chat AI call failed; serving offline fallback. Reason: {}", safeSnippet(ex.getMessage()));
-            return buildOfflineFallbackAnswer(sanitizedQuestion, assistantRole);
+            return buildOfflineFallbackAnswer(prompt.question(), assistantRole);
         }
     }
 
+    /** Thrown when the client went away mid-stream; carries what was generated so far. */
+    public static class StreamCancelledException extends RuntimeException {
+        private final String partialAnswer;
+
+        public StreamCancelledException(String partialAnswer) {
+            super("Chat stream cancelled by the client");
+            this.partialAnswer = partialAnswer;
+        }
+
+        public String getPartialAnswer() {
+            return partialAnswer;
+        }
+    }
+
+    /** Thrown when the model failed after some tokens were already sent; carries the partial answer. */
+    public static class StreamInterruptedException extends RuntimeException {
+        private final String partialAnswer;
+
+        public StreamInterruptedException(String partialAnswer, Throwable cause) {
+            super("The AI response was interrupted", cause);
+            this.partialAnswer = partialAnswer;
+        }
+
+        public String getPartialAnswer() {
+            return partialAnswer;
+        }
+    }
+
+    /**
+     * Streams a chat answer token by token. Goes through the same guard as other model calls
+     * (one at a time, time limit, circuit breaker). If the model is unavailable before any token was produced,
+     * the offline fallback is delivered as a single delta, matching {@link #answerGeneralQuery}.
+     *
+     * @param onDelta   receives each chunk of text in order
+     * @param cancelled polled between chunks; when true the stream stops and {@link StreamCancelledException} is thrown
+     * @return the full answer
+     */
+    public String streamGeneralQuery(String question, List<ChatRequest.ChatMessage> history, String userId,
+                                     String assistantRole, java.util.function.Consumer<String> onDelta,
+                                     java.util.function.BooleanSupplier cancelled) {
+        ChatPrompt prompt = buildChatPrompt(question, history, userId, assistantRole);
+        OllamaOptions options = OllamaOptions.builder()
+                .model(model)
+                .temperature(0.4d)
+                .topP(0.9)
+                .numPredict(chatMaxTokens())
+                .numCtx(numCtx)
+                .build();
+        StringBuilder answer = new StringBuilder();
+        try {
+            aiCallGuard.execute(() -> {
+                chatClient.prompt()
+                        .system(prompt.system())
+                        .user(enforceRequestSizeLimit(prompt.user()))
+                        .options(options)
+                        .stream()
+                        .content()
+                        .takeWhile(chunk -> !cancelled.getAsBoolean())
+                        .doOnNext(chunk -> {
+                            if (chunk != null && !chunk.isEmpty() && answer.length() < 4000) {
+                                answer.append(chunk);
+                                onDelta.accept(chunk);
+                            }
+                        })
+                        .blockLast();
+                return answer.length();
+            });
+        } catch (RuntimeException ex) {
+            if (cancelled.getAsBoolean()) {
+                throw new StreamCancelledException(answer.toString());
+            }
+            if (answer.length() > 0) {
+                log.warn("Chat stream failed after {} chars: {}", answer.length(), safeSnippet(ex.getMessage()));
+                throw new StreamInterruptedException(answer.toString(), ex);
+            }
+            log.warn("Streaming chat AI call failed; serving offline fallback. Reason: {}", safeSnippet(ex.getMessage()));
+            String fallback = buildOfflineFallbackAnswer(prompt.question(), assistantRole);
+            onDelta.accept(fallback);
+            return fallback;
+        }
+        if (cancelled.getAsBoolean()) {
+            throw new StreamCancelledException(answer.toString());
+        }
+        if (answer.length() == 0) {
+            String fallback = buildOfflineFallbackAnswer(prompt.question(), assistantRole);
+            onDelta.accept(fallback);
+            return fallback;
+        }
+        return answer.toString();
+    }
     private String buildOfflineFallbackAnswer(String question, String assistantRole) {
         String lower = question == null ? "" : question.toLowerCase();
         String role = assistantRole == null ? "SME" : assistantRole.trim().toUpperCase();

@@ -39,7 +39,7 @@ class AIServiceOllamaLiveIT {
 
     @Test
     void generatesAQuestionWithLocalModel() {
-        String baseUrl = System.getenv().getOrDefault("OLLAMA_BASE_URL", "http://localhost:11434");
+        String baseUrl = System.getenv().getOrDefault("OLLAMA_BASE_URL", "http://127.0.0.1:11434");
         String model = System.getenv().getOrDefault("OLLAMA_MODEL", "qwen2.5:3b");
 
         OllamaChatModel chatModel = OllamaChatModel.builder()
