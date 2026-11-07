@@ -57,6 +57,30 @@ public class JwtUtilsTest {
     }
 
     @Test
+    @DisplayName("validateConfiguration rejects a missing secret")
+    void validateConfiguration_missingSecret_throws() {
+        ReflectionTestUtils.setField(jwtUtils, "jwtSecret", "");
+        assertThatThrownBy(() -> jwtUtils.validateConfiguration())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("JWT_SECRET");
+    }
+
+    @Test
+    @DisplayName("validateConfiguration rejects a secret shorter than 32 bytes")
+    void validateConfiguration_shortSecret_throws() {
+        ReflectionTestUtils.setField(jwtUtils, "jwtSecret", "too-short-secret");
+        assertThatThrownBy(() -> jwtUtils.validateConfiguration())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("32");
+    }
+
+    @Test
+    @DisplayName("validateConfiguration accepts a 32+ byte secret")
+    void validateConfiguration_validSecret_passes() {
+        assertThatCode(() -> jwtUtils.validateConfiguration()).doesNotThrowAnyException();
+    }
+
+    @Test
     @DisplayName("Different users get different tokens")
     void generateToken_differentUsersGetDifferentTokens() {
         String t1 = jwtUtils.generateToken("user.one", "SME");

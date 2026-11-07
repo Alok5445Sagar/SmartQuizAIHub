@@ -19,3 +19,13 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Secrets / local env
+.env
+*.env.local
+
+# Test & runtime artifacts
+frontend/coverage/
+backend/backend-data/
+backend-data/
+frontend/smoke-chat-upload.txt
