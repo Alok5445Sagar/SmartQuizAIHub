@@ -140,7 +140,7 @@ export default function TeamChatPage() {
       });
       applyUsers(res.data?.users || []);
     } catch (err) {
-      toast.error(err?.response?.data?.message || t('teamChatLoadUsersFailed'));
+      toast.error((err?.response?.data?.detail || err?.response?.data?.message) || t('teamChatLoadUsersFailed'));
     }
   };
 
@@ -189,7 +189,7 @@ export default function TeamChatPage() {
       });
     } catch (err) {
       if (shouldShowBlockingLoader) {
-        toast.error(err?.response?.data?.message || t('teamChatLoadHistoryFailed'));
+        toast.error((err?.response?.data?.detail || err?.response?.data?.message) || t('teamChatLoadHistoryFailed'));
       }
     } finally {
       if (shouldShowBlockingLoader) {
@@ -291,7 +291,7 @@ export default function TeamChatPage() {
         setText(message);
       }
 
-      toast.error(err?.response?.data?.message || t('teamChatSendFailed'));
+      toast.error((err?.response?.data?.detail || err?.response?.data?.message) || t('teamChatSendFailed'));
     } finally {
       setSendingByUser((prev) => ({ ...prev, [targetEnterpriseId]: false }));
       publishTyping(false, targetEnterpriseId);
@@ -329,7 +329,7 @@ export default function TeamChatPage() {
         setText('');
       }
     } catch (err) {
-      toast.error(err?.response?.data?.message || 'Failed to upload attachment');
+      toast.error((err?.response?.data?.detail || err?.response?.data?.message) || 'Failed to upload attachment');
     } finally {
       setUploadingByUser((prev) => ({ ...prev, [targetEnterpriseId]: false }));
       if (attachmentInputRef.current) {

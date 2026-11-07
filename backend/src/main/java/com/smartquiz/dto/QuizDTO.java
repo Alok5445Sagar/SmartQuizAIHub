@@ -3,6 +3,10 @@ package com.smartquiz.dto;
 import com.smartquiz.entity.MCQ;
 import com.smartquiz.entity.MCQTranslation;
 import com.smartquiz.entity.Quiz;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -21,8 +25,11 @@ public class QuizDTO {
         private Integer totalQuestions;
         private Integer mcqCount;
         private Integer msqCount;
+        @Min(value = 1, message = "Quiz duration must be greater than zero minutes") @Max(value = 600, message = "Quiz duration cannot exceed 600 minutes")
         private Integer durationMinutes;
+        @Size(max = 300, message = "Title cannot exceed 300 characters")
         private String title;
+        @NotEmpty(message = "Please select quiz questions") @Size(max = 200, message = "A quiz cannot have more than 200 questions")
         private List<Long> questionIds;
     }
 
@@ -205,6 +212,7 @@ public class QuizDTO {
     public static class ParticipantLoginRequest {
         private String enterpriseId;
         private String password;
+        @Size(max = 200, message = "Participant name cannot exceed 200 characters")
         private String participantName;
     }
 
@@ -328,6 +336,7 @@ public class QuizDTO {
         private String participantEnterpriseId;
         private String participantAuthToken;
         private String recipientEnterpriseId;
+        @Size(max = 2000, message = "Message text exceeds allowed length")
         private String message;
     }
 
@@ -371,9 +380,11 @@ public class QuizDTO {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class SubmitAttemptRequest {
+        @Size(max = 200, message = "Participant name cannot exceed 200 characters")
         private String participantName;
         private String participantEnterpriseId;
         private String participantAuthToken;
+        @Size(max = 200)
         private List<AnswerRequest> answers;
         private Integer elapsedSeconds;
         private Boolean autoSubmitted;

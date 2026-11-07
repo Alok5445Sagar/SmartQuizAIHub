@@ -1,5 +1,10 @@
 package com.smartquiz.service;
 
+import com.smartquiz.exception.NotFoundException;
+import com.smartquiz.exception.ConflictException;
+import com.smartquiz.exception.BusinessRuleException;
+import com.smartquiz.exception.UnauthorizedException;
+
 import com.smartquiz.dto.QuizDTO;
 import com.smartquiz.entity.*;
 import com.smartquiz.repository.*;
@@ -64,7 +69,7 @@ public class QuizService {
         List<Long> safeTopicIds = topicIds == null ? Collections.emptyList() : topicIds.stream().filter(Objects::nonNull).distinct().collect(Collectors.toList());
 
         if (safeStackIds.isEmpty() && safeTopicIds.isEmpty()) {
-            throw new RuntimeException("Select at least one topic or subtopic before loading approved questions");
+            throw new BusinessRuleException("Select at least one topic or subtopic before loading approved questions");
         }
 
         return mcqRepository.findApprovedByStackIdsAndTopicIds(
@@ -80,7 +85,7 @@ public class QuizService {
 
     public QuizDTO.AutoPickResponse autoPickQuestions(QuizDTO.AutoPickRequest request) {
         if (request == null) {
-            throw new RuntimeException("Auto-pick request is required");
+            throw new BusinessRuleException("Auto-pick request is required");
         }
 
         int totalQuestions = resolveTotalQuestions(request.getTotalQuestions());
@@ -93,7 +98,7 @@ public class QuizService {
         int hardCount = normalizeDifficultyCount(request.getHardCount(), "Hard");
 
         if (easyCount + mediumCount + hardCount != totalQuestions) {
-            throw new RuntimeException("Difficulty distribution must total exactly " + totalQuestions + " questions");
+            throw new BusinessRuleException("Difficulty distribution must total exactly " + totalQuestions + " questions");
         }
 
         List<Long> safeStackIds = request.getStackIds() == null
@@ -108,7 +113,7 @@ public class QuizService {
         }
 
         if (safeStackIds.isEmpty() && safeTopicIds.isEmpty()) {
-            throw new RuntimeException("Select at least one topic or subtopic before auto-pick");
+            throw new BusinessRuleException("Select at least one topic or subtopic before auto-pick");
         }
 
         List<MCQ> approvedQuestions = mcqRepository.findApprovedByStackIdsAndTopicIds(
@@ -119,13 +124,13 @@ public class QuizService {
             safeTopicIds.isEmpty());
 
         if (approvedQuestions.size() < totalQuestions) {
-            throw new RuntimeException("Not enough approved questions to auto-pick a quiz");
+            throw new BusinessRuleException("Not enough approved questions to auto-pick a quiz");
         }
 
         long availableMcq = approvedQuestions.stream().filter(q -> q.getQuestionType() == MCQ.QuestionType.MCQ).count();
         long availableMsq = approvedQuestions.stream().filter(q -> q.getQuestionType() == MCQ.QuestionType.MSQ).count();
         if (availableMcq < mcqCount || availableMsq < msqCount) {
-            throw new RuntimeException("Auto-pick requires at least " + mcqCount + " approved MCQ and " + msqCount + " approved MSQ questions");
+            throw new BusinessRuleException("Auto-pick requires at least " + mcqCount + " approved MCQ and " + msqCount + " approved MSQ questions");
         }
 
         List<Long> candidateIds = approvedQuestions.stream().map(MCQ::getQuestionId).collect(Collectors.toList());
@@ -140,7 +145,7 @@ public class QuizService {
         }
 
         if (selected == null || selected.size() != totalQuestions) {
-            throw new RuntimeException("Unable to auto-pick questions for the requested type composition");
+            throw new BusinessRuleException("Unable to auto-pick questions for the requested type composition");
         }
 
         List<Long> selectedIds = selected.stream().map(MCQ::getQuestionId).collect(Collectors.toList());
@@ -251,7 +256,7 @@ public class QuizService {
     @Transactional
     public QuizDTO.PublishedQuizSummary publishQuiz(String adminEnterpriseId, QuizDTO.PublishRequest request) {
         if (request.getQuestionIds() == null || request.getQuestionIds().isEmpty()) {
-            throw new RuntimeException("Please select quiz questions");
+            throw new BusinessRuleException("Please select quiz questions");
         }
 
         List<Long> distinctQuestionIds = request.getQuestionIds().stream().distinct().collect(Collectors.toList());
@@ -262,14 +267,14 @@ public class QuizService {
         validateTypeComposition(totalQuestions, mcqCount, msqCount);
 
         if (distinctQuestionIds.size() != totalQuestions) {
-            throw new RuntimeException("Quiz must include exactly " + totalQuestions + " questions");
+            throw new BusinessRuleException("Quiz must include exactly " + totalQuestions + " questions");
         }
 
-        User admin = userRepository.findByEnterpriseId(adminEnterpriseId).orElseThrow(() -> new RuntimeException("Admin not found"));
+        User admin = userRepository.findByEnterpriseId(adminEnterpriseId).orElseThrow(() -> new NotFoundException("Admin not found"));
 
         List<MCQ> selectedQuestions = mcqRepository.findAllById(distinctQuestionIds);
         if (selectedQuestions.size() != distinctQuestionIds.size()) {
-            throw new RuntimeException("One or more selected questions were not found");
+            throw new NotFoundException("One or more selected questions were not found");
         }
 
         MCQ representativeQuestion = selectedQuestions.get(0);
@@ -277,14 +282,14 @@ public class QuizService {
 
         for (MCQ question : selectedQuestions) {
             if (question.getStatus() != MCQ.Status.APPROVED) {
-                throw new RuntimeException("Only APPROVED questions can be published in a quiz");
+                throw new BusinessRuleException("Only APPROVED questions can be published in a quiz");
             }
         }
 
         long selectedMcqCount = selectedQuestions.stream().filter(q -> q.getQuestionType() == MCQ.QuestionType.MCQ).count();
         long selectedMsqCount = selectedQuestions.stream().filter(q -> q.getQuestionType() == MCQ.QuestionType.MSQ).count();
         if (selectedMcqCount != mcqCount || selectedMsqCount != msqCount) {
-            throw new RuntimeException("Quiz must include exactly " + mcqCount + " MCQ and " + msqCount + " MSQ questions");
+            throw new BusinessRuleException("Quiz must include exactly " + mcqCount + " MCQ and " + msqCount + " MSQ questions");
         }
 
         Quiz quiz = new Quiz();
@@ -339,9 +344,9 @@ public class QuizService {
 
     @Transactional
     public QuizDTO.PublishedQuizSummary closeQuiz(Long quizId) {
-        Quiz quiz = quizRepository.findById(quizId).orElseThrow(() -> new RuntimeException("Quiz not found"));
+        Quiz quiz = quizRepository.findById(quizId).orElseThrow(() -> new NotFoundException("Quiz not found"));
         if (quiz.getStatus() == Quiz.Status.CLOSED) {
-            throw new RuntimeException("Quiz is already closed");
+            throw new ConflictException("Quiz is already closed");
         }
         quiz.setStatus(Quiz.Status.CLOSED);
         quiz.setClosedAt(LocalDateTime.now());
@@ -352,9 +357,9 @@ public class QuizService {
 
     @Transactional
     public QuizDTO.PublishedQuizSummary reopenQuiz(Long quizId) {
-        Quiz quiz = quizRepository.findById(quizId).orElseThrow(() -> new RuntimeException("Quiz not found"));
+        Quiz quiz = quizRepository.findById(quizId).orElseThrow(() -> new NotFoundException("Quiz not found"));
         if (quiz.getStatus() == Quiz.Status.PUBLISHED) {
-            throw new RuntimeException("Quiz is already published");
+            throw new ConflictException("Quiz is already published");
         }
 
         quiz.setStatus(Quiz.Status.PUBLISHED);
@@ -366,17 +371,17 @@ public class QuizService {
 
     @Transactional
     public QuizDTO.PublishedQuizSummary rehostClosedQuiz(String adminEnterpriseId, Long quizId) {
-        Quiz closedQuiz = quizRepository.findById(quizId).orElseThrow(() -> new RuntimeException("Quiz not found"));
+        Quiz closedQuiz = quizRepository.findById(quizId).orElseThrow(() -> new NotFoundException("Quiz not found"));
         if (closedQuiz.getStatus() != Quiz.Status.CLOSED) {
-            throw new RuntimeException("Only CLOSED quizzes can be hosted again");
+            throw new BusinessRuleException("Only CLOSED quizzes can be hosted again");
         }
 
         User admin = userRepository.findByEnterpriseId(adminEnterpriseId)
-                .orElseThrow(() -> new RuntimeException("Admin not found"));
+                .orElseThrow(() -> new NotFoundException("Admin not found"));
 
         List<QuizQuestion> closedQuizQuestions = quizQuestionRepository.findByQuizOrderByQuestionOrderAsc(closedQuiz);
         if (closedQuizQuestions.isEmpty()) {
-            throw new RuntimeException("Cannot host again because the quiz has no configured questions");
+            throw new BusinessRuleException("Cannot host again because the quiz has no configured questions");
         }
 
         Quiz newQuiz = new Quiz();
@@ -405,7 +410,7 @@ public class QuizService {
     }
 
     public byte[] exportLeaderboardExcel(Long quizId) {
-        Quiz quiz = quizRepository.findById(quizId).orElseThrow(() -> new RuntimeException("Quiz not found"));
+        Quiz quiz = quizRepository.findById(quizId).orElseThrow(() -> new NotFoundException("Quiz not found"));
         List<QuizAttempt> attempts = quizAttemptRepository.findLeaderboardByQuiz(quiz);
 
         try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
@@ -438,7 +443,7 @@ public class QuizService {
             workbook.write(outputStream);
             return outputStream.toByteArray();
         } catch (Exception ex) {
-            throw new RuntimeException("Failed to export leaderboard", ex);
+            throw new IllegalStateException("Failed to export leaderboard", ex);
         }
     }
 
@@ -525,10 +530,10 @@ public class QuizService {
     public QuizDTO.ParticipantLoginResponse loginParticipant(String quizCode, QuizDTO.ParticipantLoginRequest request) {
         getQuizByCodeOrThrow(quizCode);
         if (request.getEnterpriseId() == null || request.getEnterpriseId().isBlank()) {
-            throw new RuntimeException("Enterprise ID is required");
+            throw new BusinessRuleException("Enterprise ID is required");
         }
         if (request.getPassword() == null || request.getPassword().isBlank()) {
-            throw new RuntimeException("Password is required");
+            throw new BusinessRuleException("Password is required");
         }
 
         try {
@@ -536,14 +541,14 @@ public class QuizService {
                     new UsernamePasswordAuthenticationToken(request.getEnterpriseId().trim(), request.getPassword())
             );
             if (authentication == null || !authentication.isAuthenticated()) {
-                throw new RuntimeException("Invalid credentials");
+                throw new UnauthorizedException("Invalid credentials");
             }
         } catch (AuthenticationException ex) {
-            throw new RuntimeException("Invalid credentials");
+            throw new UnauthorizedException("Invalid credentials");
         }
 
         User user = userRepository.findByEnterpriseId(request.getEnterpriseId().trim())
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> new NotFoundException("User not found"));
         String token = jwtUtils.generateToken(user.getEnterpriseId(), user.getRole().name());
 
         return new QuizDTO.ParticipantLoginResponse(
@@ -557,12 +562,12 @@ public class QuizService {
 
     public QuizDTO.ParticipantLoginResponse loginParticipantPortal(QuizDTO.ParticipantLoginRequest request) {
         if (request == null) {
-            throw new RuntimeException("Login request is required");
+            throw new BusinessRuleException("Login request is required");
         }
 
         if (request.getEnterpriseId() != null && !request.getEnterpriseId().isBlank()) {
             if (request.getPassword() == null || request.getPassword().isBlank()) {
-                throw new RuntimeException("Password is required for employee login");
+                throw new BusinessRuleException("Password is required for employee login");
             }
 
             try {
@@ -570,11 +575,11 @@ public class QuizService {
                     new UsernamePasswordAuthenticationToken(request.getEnterpriseId().trim(), request.getPassword())
                 );
             } catch (AuthenticationException ex) {
-                throw new RuntimeException("Invalid credentials");
+                throw new UnauthorizedException("Invalid credentials");
             }
 
             User user = userRepository.findByEnterpriseId(request.getEnterpriseId().trim())
-                .orElseThrow(() -> new RuntimeException("Employee not found"));
+                .orElseThrow(() -> new NotFoundException("Employee not found"));
             String token = jwtUtils.generateToken(user.getEnterpriseId(), user.getRole().name());
             return new QuizDTO.ParticipantLoginResponse(
                 user.getEnterpriseId(),
@@ -587,7 +592,7 @@ public class QuizService {
 
         String guestName = normalizeName(request.getParticipantName());
         if (guestName == null) {
-            throw new RuntimeException("Participant name is required for guest login");
+            throw new BusinessRuleException("Participant name is required for guest login");
         }
 
         return new QuizDTO.ParticipantLoginResponse(null, guestName, null, "GUEST", "en");
@@ -602,7 +607,7 @@ public class QuizService {
         String normalizedName = normalizeName(participantName);
 
         if ((normalizedEnterpriseId == null || normalizedEnterpriseId.isBlank()) && normalizedName == null) {
-            throw new RuntimeException("Participant identity is required");
+            throw new BusinessRuleException("Participant identity is required");
         }
 
         long liveQuizFetchStartedAt = System.nanoTime();
@@ -777,12 +782,12 @@ public class QuizService {
         Quiz quiz = getQuizByCodeOrThrow(quizCode);
 
         if (quiz.getStatus() != Quiz.Status.PUBLISHED) {
-            throw new RuntimeException("This quiz is closed and cannot accept new attempts");
+            throw new BusinessRuleException("This quiz is closed and cannot accept new attempts");
         }
 
         String normalizedName = normalizeName(request.getParticipantName());
         if (normalizedName == null) {
-            throw new RuntimeException("Participant name is required");
+            throw new BusinessRuleException("Participant name is required");
         }
 
         String participantEnterpriseId = null;
@@ -793,22 +798,22 @@ public class QuizService {
             validateParticipantToken(request.getParticipantAuthToken(), enterpriseId);
 
             User user = userRepository.findByEnterpriseId(enterpriseId)
-                    .orElseThrow(() -> new RuntimeException("Employee not found"));
+                    .orElseThrow(() -> new NotFoundException("Employee not found"));
             participantEnterpriseId = user.getEnterpriseId();
             participantName = user.getFullName();
 
             if (quizAttemptRepository.existsByQuizAndParticipantEnterpriseId(quiz, participantEnterpriseId)) {
-                throw new RuntimeException("You have already attempted this quiz");
+                throw new ConflictException("You have already attempted this quiz");
             }
         } else {
             if (quizAttemptRepository.existsGuestByQuizAndParticipantName(quiz, participantName)) {
-                throw new RuntimeException("A participant with this name has already attempted this quiz");
+                throw new ConflictException("A participant with this name has already attempted this quiz");
             }
         }
 
         List<QuizQuestion> quizQuestions = quizQuestionRepository.findByQuizOrderByQuestionOrderAsc(quiz);
         if (quizQuestions.isEmpty()) {
-            throw new RuntimeException("Quiz has no questions configured");
+            throw new BusinessRuleException("Quiz has no questions configured");
         }
 
         Map<Long, MCQ> questionMap = quizQuestions.stream()
@@ -824,7 +829,7 @@ public class QuizService {
         boolean autoSubmitted = Boolean.TRUE.equals(request.getAutoSubmitted()) || (maxDurationSeconds > 0 && elapsedSeconds >= maxDurationSeconds);
 
         if (!autoSubmitted && answers.size() != quizQuestions.size()) {
-            throw new RuntimeException("All quiz questions must be attempted before submission");
+            throw new BusinessRuleException("All quiz questions must be attempted before submission");
         }
 
         Set<Long> submittedQuestionIds = answers.stream()
@@ -832,7 +837,7 @@ public class QuizService {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         if (!autoSubmitted && (submittedQuestionIds.size() != quizQuestions.size() || !questionMap.keySet().containsAll(submittedQuestionIds))) {
-            throw new RuntimeException("All quiz questions must be attempted before submission");
+            throw new BusinessRuleException("All quiz questions must be attempted before submission");
         }
 
         int correctCount = 0;
@@ -856,12 +861,12 @@ public class QuizService {
             }
 
             if (!autoSubmitted && (answer.getSelectedAnswers() == null || answer.getSelectedAnswers().isEmpty())) {
-                throw new RuntimeException("All quiz questions must be attempted before submission");
+                throw new BusinessRuleException("All quiz questions must be attempted before submission");
             }
 
             String selected = normalizeSelectedAnswers(answer.getSelectedAnswers());
             if (!autoSubmitted && selected.isBlank()) {
-                throw new RuntimeException("All quiz questions must be attempted before submission");
+                throw new BusinessRuleException("All quiz questions must be attempted before submission");
             }
             String expected = normalizeSelectedAnswers(Arrays.asList(question.getCorrectAnswer().split(",")));
             boolean isCorrect = !selected.isBlank() && selected.equals(expected);
@@ -944,7 +949,7 @@ public class QuizService {
 
             public QuizDTO.TopicLeaderboardResponse getTopicLeaderboard(Long topicId, String participantType) {
             Topic topic = topicRepository.findById(topicId)
-                .orElseThrow(() -> new RuntimeException("Topic not found"));
+                .orElseThrow(() -> new NotFoundException("Topic not found"));
 
             String normalizedType = normalizeParticipantTypeOrAll(participantType);
             List<Quiz> quizzesForTopic = quizRepository.findAll().stream()
@@ -1338,13 +1343,13 @@ public class QuizService {
 
     private Quiz getQuizByCodeOrThrow(String quizCode) {
         return quizRepository.findByQuizCode(quizCode)
-                .orElseThrow(() -> new RuntimeException("Quiz not found"));
+                .orElseThrow(() -> new NotFoundException("Quiz not found"));
     }
 
     private String normalizeParticipantType(String participantType) {
         String type = participantType == null ? "EMPLOYEE" : participantType.trim().toUpperCase(Locale.ROOT);
         if (!type.equals("EMPLOYEE") && !type.equals("GUEST")) {
-            throw new RuntimeException("Participant type must be EMPLOYEE or GUEST");
+            throw new BusinessRuleException("Participant type must be EMPLOYEE or GUEST");
         }
         return type;
     }
@@ -1352,7 +1357,7 @@ public class QuizService {
     private String normalizeParticipantTypeOrAll(String participantType) {
         String type = participantType == null ? "ALL" : participantType.trim().toUpperCase(Locale.ROOT);
         if (!type.equals("ALL") && !type.equals("EMPLOYEE") && !type.equals("GUEST")) {
-            throw new RuntimeException("Participant type must be ALL, EMPLOYEE or GUEST");
+            throw new BusinessRuleException("Participant type must be ALL, EMPLOYEE or GUEST");
         }
         return type;
     }
@@ -1504,14 +1509,14 @@ public class QuizService {
 
     private void validateParticipantToken(String token, String expectedEnterpriseId) {
         if (token == null || token.isBlank()) {
-            throw new RuntimeException("Employee login is required to submit with enterprise ID");
+            throw new UnauthorizedException("Employee login is required to submit with enterprise ID");
         }
         if (!jwtUtils.validateToken(token)) {
-            throw new RuntimeException("Employee session is invalid or expired");
+            throw new UnauthorizedException("Employee session is invalid or expired");
         }
         String tokenEnterpriseId = jwtUtils.getEnterpriseIdFromToken(token);
         if (!expectedEnterpriseId.equals(tokenEnterpriseId)) {
-            throw new RuntimeException("Employee session does not match the selected enterprise ID");
+            throw new UnauthorizedException("Employee session does not match the selected enterprise ID");
         }
     }
 
@@ -1549,7 +1554,7 @@ public class QuizService {
                 return candidate;
             }
         }
-        throw new RuntimeException("Unable to generate unique quiz code. Try again.");
+        throw new IllegalStateException("Unable to generate unique quiz code. Try again.");
     }
 
     private String randomCode(int length) {
@@ -1576,7 +1581,7 @@ public class QuizService {
 
     private int normalizeDifficultyCount(Integer value, String label) {
         if (value == null || value < 0) {
-            throw new RuntimeException(label + " count must be zero or greater");
+            throw new BusinessRuleException(label + " count must be zero or greater");
         }
         return value;
     }
@@ -1587,7 +1592,7 @@ public class QuizService {
         long availableHard = approvedQuestions.stream().filter(q -> q.getDifficulty() == MCQ.Difficulty.Hard).count();
 
         if (availableEasy < easyCount || availableMedium < mediumCount || availableHard < hardCount) {
-            throw new RuntimeException("Not enough approved questions for requested easy/medium/hard distribution");
+            throw new BusinessRuleException("Not enough approved questions for requested easy/medium/hard distribution");
         }
     }
 
@@ -1719,7 +1724,7 @@ public class QuizService {
             return DEFAULT_QUIZ_TOTAL_QUESTIONS;
         }
         if (requestedTotal <= 0) {
-            throw new RuntimeException("Total questions must be greater than zero");
+            throw new BusinessRuleException("Total questions must be greater than zero");
         }
         return requestedTotal;
     }
@@ -1729,14 +1734,14 @@ public class QuizService {
             return defaultValue;
         }
         if (requestedValue < 0) {
-            throw new RuntimeException(label + " count must be zero or greater");
+            throw new BusinessRuleException(label + " count must be zero or greater");
         }
         return requestedValue;
     }
 
     private void validateTypeComposition(int totalQuestions, int mcqCount, int msqCount) {
         if (mcqCount + msqCount != totalQuestions) {
-            throw new RuntimeException("MCQ + MSQ must total exactly " + totalQuestions + " questions");
+            throw new BusinessRuleException("MCQ + MSQ must total exactly " + totalQuestions + " questions");
         }
     }
 
@@ -1745,7 +1750,7 @@ public class QuizService {
             return DEFAULT_QUIZ_DURATION_MINUTES;
         }
         if (requestedDurationMinutes <= 0) {
-            throw new RuntimeException("Quiz duration must be greater than zero minutes");
+            throw new BusinessRuleException("Quiz duration must be greater than zero minutes");
         }
         return requestedDurationMinutes;
     }

@@ -1,5 +1,10 @@
 package com.smartquiz.service;
 
+import com.smartquiz.exception.NotFoundException;
+import com.smartquiz.exception.ForbiddenException;
+import com.smartquiz.exception.ConflictException;
+import com.smartquiz.exception.BusinessRuleException;
+
 import com.smartquiz.ai.AIService;
 import com.smartquiz.dto.MCQDTO;
 import com.smartquiz.dto.SimilarityCheckResponse;
@@ -34,9 +39,9 @@ public class MCQService {
     private static final Set<String> SUPPORTED_LANGUAGE_CODES = Set.of("en", "es", "fr", "ro");
 
     public MCQDTO.Response createMCQ(String creatorId, MCQDTO.CreateRequest req) {
-        User creator = userRepository.findByEnterpriseId(creatorId).orElseThrow();
-        TechnologyStack stack = stackRepository.findById(req.getStackId()).orElseThrow();
-        Topic topic = topicRepository.findById(req.getTopicId()).orElseThrow();
+        User creator = userRepository.findByEnterpriseId(creatorId).orElseThrow(() -> new NotFoundException("User not found"));
+        TechnologyStack stack = stackRepository.findById(req.getStackId()).orElseThrow(() -> new NotFoundException("Stack not found"));
+        Topic topic = topicRepository.findById(req.getTopicId()).orElseThrow(() -> new NotFoundException("Topic not found"));
 
         MCQ.QuestionType normalizedType = normalizeQuestionType(req.getQuestionType());
         String normalizedCorrectAnswer = normalizeCorrectAnswer(
@@ -55,7 +60,7 @@ public class MCQService {
         // - Manually added MCQs (Add UI) are validated on Edit page/update flow.
         if (req.isAiGenerated() && mcqRepository.existsByQuestionStemAndStackAndTopic(
             normalizedStem, req.getStackId(), req.getTopicId())) {
-            throw new RuntimeException(
+            throw new ConflictException(
                 "Duplicate question: A question with the same stem already exists in this stack and topic.");
         }
 
@@ -81,32 +86,32 @@ public class MCQService {
     }
 
     public MCQDTO.Response updateMCQ(String updaterId, Long questionId, MCQDTO.UpdateRequest req, boolean isAdmin) {
-        MCQ mcq = mcqRepository.findById(questionId).orElseThrow();
+        MCQ mcq = mcqRepository.findById(questionId).orElseThrow(() -> new NotFoundException("Question not found"));
 
         // Only creator can edit DRAFT, Admin can edit any non-draft
         if (!isAdmin && !mcq.getCreator().getEnterpriseId().equals(updaterId)) {
-            throw new RuntimeException("Not authorized to edit this MCQ");
+            throw new ForbiddenException("Not authorized to edit this MCQ");
         }
         if (!isAdmin) {
             // SME can only edit their own DRAFT or REJECTED questions
             if (!mcq.getCreator().getEnterpriseId().equals(updaterId)) {
-                throw new RuntimeException("Not authorized to edit this MCQ");
+                throw new ForbiddenException("Not authorized to edit this MCQ");
             }
             if (mcq.getStatus() != MCQ.Status.DRAFT && mcq.getStatus() != MCQ.Status.REJECTED) {
-                throw new RuntimeException("Can only edit DRAFT or REJECTED questions");
+                throw new BusinessRuleException("Can only edit DRAFT or REJECTED questions");
             }
         } else {
             // Admin can edit any non-draft question.
             // For DRAFT, only the admin who created it can edit.
             if (mcq.getStatus() == MCQ.Status.DRAFT) {
                 if (!mcq.getCreator().getEnterpriseId().equals(updaterId)) {
-                    throw new RuntimeException("Admin can edit DRAFT questions only if they are the creator.");
+                    throw new ForbiddenException("Admin can edit DRAFT questions only if they are the creator.");
                 }
             }
         }
 
-        TechnologyStack stack = stackRepository.findById(req.getStackId()).orElseThrow();
-        Topic topic = topicRepository.findById(req.getTopicId()).orElseThrow();
+        TechnologyStack stack = stackRepository.findById(req.getStackId()).orElseThrow(() -> new NotFoundException("Stack not found"));
+        Topic topic = topicRepository.findById(req.getTopicId()).orElseThrow(() -> new NotFoundException("Topic not found"));
 
         MCQ.QuestionType normalizedType = normalizeQuestionType(req.getQuestionType());
         String normalizedCorrectAnswer = normalizeCorrectAnswer(
@@ -127,7 +132,7 @@ public class MCQService {
                 normalizedStem, req.getStackId(), req.getTopicId())
             && mcqRepository.existsByQuestionStemAndStackAndTopicExcluding(
                 normalizedStem, req.getStackId(), req.getTopicId(), questionId)) {
-            throw new RuntimeException(
+            throw new ConflictException(
                 "Duplicate question: A question with the same stem already exists in this stack and topic.");
         }
 
@@ -154,18 +159,18 @@ public class MCQService {
     }
 
     public void deleteMCQ(String requesterId, Long questionId, boolean isAdmin) {
-        MCQ mcq = mcqRepository.findById(questionId).orElseThrow();
+        MCQ mcq = mcqRepository.findById(questionId).orElseThrow(() -> new NotFoundException("Question not found"));
 
         if (!isAdmin) {
             if (!mcq.getCreator().getEnterpriseId().equals(requesterId)) {
-                throw new RuntimeException("Not authorized to delete this MCQ");
+                throw new ForbiddenException("Not authorized to delete this MCQ");
             }
             if (mcq.getStatus() != MCQ.Status.DRAFT && mcq.getStatus() != MCQ.Status.REJECTED) {
-                throw new RuntimeException("Can only delete DRAFT or REJECTED questions");
+                throw new BusinessRuleException("Can only delete DRAFT or REJECTED questions");
             }
         } else {
             if (mcq.getStatus() == MCQ.Status.DRAFT) {
-                throw new RuntimeException("Admin cannot delete DRAFT questions. Only the creator can delete a DRAFT.");
+                throw new ForbiddenException("Admin cannot delete DRAFT questions. Only the creator can delete a DRAFT.");
             }
         }
 
@@ -263,7 +268,7 @@ public class MCQService {
     }
 
     public MCQDTO.Response getMCQById(Long questionId, String languageCode) {
-        MCQ mcq = mcqRepository.findById(questionId).orElseThrow();
+        MCQ mcq = mcqRepository.findById(questionId).orElseThrow(() -> new NotFoundException("Question not found"));
         String normalizedLanguage = normalizeLanguageCode(languageCode);
         if ("en".equals(normalizedLanguage)) {
             return MCQDTO.Response.fromEntity(mcq);
@@ -303,7 +308,7 @@ public class MCQService {
     }
 
     public MCQDTO.TranslationListResponse getTranslations(Long questionId) {
-        mcqRepository.findById(questionId).orElseThrow(() -> new RuntimeException("Question not found"));
+        mcqRepository.findById(questionId).orElseThrow(() -> new NotFoundException("Question not found"));
         List<MCQDTO.TranslationResponse> rows = mcqTranslationRepository
             .findByMcqQuestionIdOrderByLanguageCodeAsc(questionId)
             .stream()
@@ -313,10 +318,10 @@ public class MCQService {
     }
 
     public MCQDTO.TranslationRequest suggestTranslation(Long questionId, String languageCode) {
-        MCQ mcq = mcqRepository.findById(questionId).orElseThrow(() -> new RuntimeException("Question not found"));
+        MCQ mcq = mcqRepository.findById(questionId).orElseThrow(() -> new NotFoundException("Question not found"));
         String normalizedLanguage = normalizeLanguageCode(languageCode);
         if ("en".equals(normalizedLanguage)) {
-            throw new RuntimeException("English is the source language and does not require translation");
+            throw new BusinessRuleException("English is the source language and does not require translation");
         }
 
         String prompt = "Translate the following technical multiple-choice question into " + normalizedLanguage +
@@ -348,14 +353,14 @@ public class MCQService {
 
     public MCQDTO.TranslationResponse saveTranslation(String translatorEnterpriseId, Long questionId, MCQDTO.TranslationRequest request) {
         if (request == null) {
-            throw new RuntimeException("Translation request is required");
+            throw new BusinessRuleException("Translation request is required");
         }
-        MCQ mcq = mcqRepository.findById(questionId).orElseThrow(() -> new RuntimeException("Question not found"));
+        MCQ mcq = mcqRepository.findById(questionId).orElseThrow(() -> new NotFoundException("Question not found"));
         User translator = userRepository.findByEnterpriseId(translatorEnterpriseId)
-            .orElseThrow(() -> new RuntimeException("User not found"));
+            .orElseThrow(() -> new NotFoundException("User not found"));
         String normalizedLanguage = normalizeLanguageCode(request.getLanguageCode());
         if ("en".equals(normalizedLanguage)) {
-            throw new RuntimeException("English is the source language and cannot be saved as translation");
+            throw new BusinessRuleException("English is the source language and cannot be saved as translation");
         }
 
         MCQTranslation translation = mcqTranslationRepository
@@ -379,14 +384,14 @@ public class MCQService {
     private String normalizeLanguageCode(String languageCode) {
         String code = languageCode == null ? "" : languageCode.trim().toLowerCase(Locale.ROOT);
         if (!SUPPORTED_LANGUAGE_CODES.contains(code)) {
-            throw new RuntimeException("Unsupported language code. Use one of: en, es, fr, ro");
+            throw new BusinessRuleException("Unsupported language code. Use one of: en, es, fr, ro");
         }
         return code;
     }
 
     private String requireValue(String value, String fieldName) {
         if (value == null || value.isBlank()) {
-            throw new RuntimeException(fieldName + " is required");
+            throw new BusinessRuleException(fieldName + " is required");
         }
         return value.trim();
     }
@@ -421,24 +426,24 @@ public class MCQService {
     }
 
     public MCQDTO.Response assignReviewer(Long questionId, String reviewerEnterpriseId) {
-        MCQ mcq = mcqRepository.findById(questionId).orElseThrow();
-        User reviewer = userRepository.findByEnterpriseId(reviewerEnterpriseId).orElseThrow();
+        MCQ mcq = mcqRepository.findById(questionId).orElseThrow(() -> new NotFoundException("Question not found"));
+        User reviewer = userRepository.findByEnterpriseId(reviewerEnterpriseId).orElseThrow(() -> new NotFoundException("User not found"));
         mcq.setReviewer(reviewer);
         mcq.setStatus(MCQ.Status.UNDER_REVIEW);
         return MCQDTO.Response.fromEntity(mcqRepository.save(mcq));
     }
 
     public MCQDTO.Response reviewMCQ(String reviewerId, Long questionId, MCQDTO.ReviewRequest req) {
-        MCQ mcq = mcqRepository.findById(questionId).orElseThrow();
+        MCQ mcq = mcqRepository.findById(questionId).orElseThrow(() -> new NotFoundException("Question not found"));
         if (!mcq.getReviewer().getEnterpriseId().equals(reviewerId)) {
-            throw new RuntimeException("Not authorized to review this MCQ");
+            throw new ForbiddenException("Not authorized to review this MCQ");
         }
 
         if ("APPROVE".equals(req.getAction())) {
             mcq.setStatus(MCQ.Status.APPROVED);
         } else if ("REJECT".equals(req.getAction())) {
             if (req.getComments() == null || req.getComments().isBlank()) {
-                throw new RuntimeException("Comments are mandatory for rejection");
+                throw new BusinessRuleException("Comments are mandatory for rejection");
             }
             mcq.setStatus(MCQ.Status.REJECTED);
             mcq.setReviewerComments(req.getComments());
@@ -479,33 +484,33 @@ public class MCQService {
     }
 
     public List<MCQDTO.Response> bulkUpload(String creatorId, MultipartFile file) throws IOException {
-    User creator = userRepository.findByEnterpriseId(creatorId).orElseThrow();
+    User creator = userRepository.findByEnterpriseId(creatorId).orElseThrow(() -> new NotFoundException("User not found"));
     List<MCQDTO.Response> results = new ArrayList<>();
     List<String> errors = new ArrayList<>();
 
     // Validate file extension
     String filename = file.getOriginalFilename();
     if (filename == null || (!filename.endsWith(".xlsx") && !filename.endsWith(".xls"))) {
-        throw new RuntimeException("Invalid file type. Please upload an .xlsx or .xls file.");
+        throw new BusinessRuleException("Invalid file type. Please upload an .xlsx or .xls file.");
     }
 
     try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
         Sheet sheet = workbook.getSheetAt(0);
 
         if (sheet.getLastRowNum() < 1) {
-            throw new RuntimeException("The file is empty. Please use the template and add at least one question row.");
+            throw new BusinessRuleException("The file is empty. Please use the template and add at least one question row.");
         }
 
         // Validate header row
         Row headerRow = sheet.getRow(0);
         String[] expectedHeaders = {"Stack_Name","Topic_Name","Difficulty","Question_Type","Question_Stem","Option_A","Option_B","Option_C","Option_D","Option_E","Option_F","Correct_Answer"};
         if (headerRow == null) {
-            throw new RuntimeException("Header row is missing. Please download and use the provided template.");
+            throw new BusinessRuleException("Header row is missing. Please download and use the provided template.");
         }
         for (int i = 0; i < expectedHeaders.length; i++) {
             String actual = getCellValue(headerRow, i);
             if (!expectedHeaders[i].equalsIgnoreCase(actual.trim())) {
-                throw new RuntimeException(
+                throw new BusinessRuleException(
                     "Invalid template format. Column " + (i+1) + " should be '" + expectedHeaders[i] +
                     "' but found '" + actual + "'. Please download and use the correct template."
                 );
@@ -554,27 +559,21 @@ public class MCQService {
                 errors.add("Row " + rowNum + ": Invalid Difficulty '" + difficulty + "'. Must be Easy, Medium, or Hard.");
                 continue;
             }
-            if ("MSQ".equalsIgnoreCase(questionType)) {
-                String[] answers = correct.split(",");
-                if (answers.length < 2) {
-                    errors.add("Row " + rowNum + ": MSQ requires at least 2 correct answers separated by comma (e.g. A,C).");
-                    continue;
-                }
-                boolean allValid = true;
-                for (String ans : answers) {
-                    if (!validAnswers.contains(ans.trim())) {
-                        errors.add("Row " + rowNum + ": Invalid answer '" + ans.trim() + "' in Correct_Answer. Must be A, B, C, D, E or F.");
-                        allValid = false;
-                        break;
-                    }
-                }
-                if (!allValid) continue;
-            } 
-            else {
-                if (!validAnswers.contains(correct)) {
-                    errors.add("Row " + rowNum + ": Invalid Correct_Answer '" + correct + "'. Must be A, B, C, or D.");
-                    continue;
-                }
+            String invalidToken = Arrays.stream(correct.toUpperCase(Locale.ROOT).split("[,\\s]+"))
+                    .filter(token -> !token.isBlank() && !validAnswers.contains(token))
+                    .findFirst()
+                    .orElse(null);
+            if (invalidToken != null) {
+                errors.add("Row " + rowNum + ": Invalid answer '" + invalidToken + "' in Correct_Answer. Must be A, B, C, D, E or F.");
+                continue;
+            }
+            // Same rules as single create: MCQ needs exactly one of A-D; MSQ needs 2+ answers that point at filled options.
+            try {
+                correct = normalizeCorrectAnswer(correct, normalizeQuestionType(questionType),
+                        optA, optB, optC, optD, optE, optF);
+            } catch (BusinessRuleException ex) {
+                errors.add("Row " + rowNum + ": " + ex.getMessage());
+                continue;
             }
 
             Optional<TechnologyStack> stackOpt = stackRepository.findByStackName(stackName);
@@ -672,7 +671,7 @@ public class MCQService {
 
     // If nothing imported and there are errors, throw with details
     if (results.isEmpty() && !errors.isEmpty()) {
-        throw new RuntimeException("No questions were imported. Errors found:\n" + String.join("\n", errors));
+        throw new BusinessRuleException("No questions were imported. Errors found:\n" + String.join("\n", errors));
     }
 
     // If partial import, attach errors to a custom exception
@@ -808,23 +807,23 @@ public class MCQService {
 
         if (questionType == MCQ.QuestionType.MCQ) {
             if (parsed.size() != 1) {
-                throw new RuntimeException("MCQ requires exactly one correct answer from A to D.");
+                throw new BusinessRuleException("MCQ requires exactly one correct answer from A to D.");
             }
             String answer = parsed.iterator().next();
             if (!List.of("A", "B", "C", "D").contains(answer)) {
-                throw new RuntimeException("MCQ correct answer must be one of A, B, C, D.");
+                throw new BusinessRuleException("MCQ correct answer must be one of A, B, C, D.");
             }
             return answer;
         }
 
         if (parsed.size() < 2) {
-            throw new RuntimeException("MSQ requires at least 2 correct answers.");
+            throw new BusinessRuleException("MSQ requires at least 2 correct answers.");
         }
 
         for (String answer : parsed) {
             String optionValue = optionMap.get(answer);
             if (optionValue == null || optionValue.isBlank()) {
-                throw new RuntimeException("MSQ correct answer '" + answer + "' must map to a non-empty option.");
+                throw new BusinessRuleException("MSQ correct answer '" + answer + "' must map to a non-empty option.");
             }
         }
 

@@ -1,5 +1,8 @@
 package com.smartquiz.ai;
 
+import com.smartquiz.exception.BusinessRuleException;
+import com.smartquiz.exception.ServiceUnavailableException;
+
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Collections;
@@ -231,7 +234,7 @@ public class AIService {
         }
 
         if (screened.size() < count) {
-            throw new RuntimeException(
+            throw new ServiceUnavailableException(
                     "Could not generate " + count + " unique non-similar questions for this topic right now. "
                             + "Please try again or change topic/difficulty.");
         }
@@ -242,7 +245,7 @@ public class AIService {
     public String answerGeneralQuery(String question, List<ChatRequest.ChatMessage> history, String userId, String assistantRole) {
         String sanitizedQuestion = question == null ? "" : question.trim().replaceAll("\\s+", " ");
         if (sanitizedQuestion.isBlank()) {
-            throw new RuntimeException("Question cannot be empty.");
+            throw new BusinessRuleException("Question cannot be empty.");
         }
 
         if (sanitizedQuestion.length() > 2000) {
@@ -427,7 +430,7 @@ public class AIService {
                         .content();
 
                 if (modelResponse == null || modelResponse.isBlank()) {
-                    throw new RuntimeException("Ollama returned an empty response.");
+                    throw new BusinessRuleException("Ollama returned an empty response.");
                 }
                 return modelResponse;
             } catch (Exception e) {
@@ -441,12 +444,12 @@ public class AIService {
                     Thread.sleep(backoffMs);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
-                    throw new RuntimeException("AI retry interrupted while waiting for backoff.");
+                    throw new IllegalStateException("AI retry interrupted while waiting for backoff.");
                 }
                 backoffMs = Math.min(backoffMs * 2L, 8000L);
             }
         }
-        throw new RuntimeException("AI service error: retry loop exhausted unexpectedly.");
+        throw new IllegalStateException("AI service error: retry loop exhausted unexpectedly.");
     }
 
     private RuntimeException mapOllamaError(Exception e) {
@@ -455,15 +458,15 @@ public class AIService {
 
         if (msg.contains("connection refused") || msg.contains("failed to connect")
                 || msg.contains("i/o error") || msg.contains("no route")) {
-            return new RuntimeException("Local AI service (Ollama) is unavailable. Make sure Ollama is running and reachable.");
+            return new ServiceUnavailableException("Local AI service (Ollama) is unavailable. Make sure Ollama is running and reachable.");
         }
         if (msg.contains("timed out") || msg.contains("timeout")) {
-            return new RuntimeException("Local AI model timed out. Try fewer questions or increase the AI read timeout.");
+            return new ServiceUnavailableException("Local AI model timed out. Try fewer questions or increase the AI read timeout.");
         }
         if (msg.contains("404") || (msg.contains("model") && msg.contains("not found"))) {
-            return new RuntimeException("AI model '" + model + "' is not available in Ollama. Run: ollama pull " + model);
+            return new ServiceUnavailableException("AI model '" + model + "' is not available in Ollama. Run: ollama pull " + model);
         }
-        return new RuntimeException("AI service error: " + e.getMessage());
+        return new ServiceUnavailableException("AI service error: " + safeSnippet(e.getMessage()));
     }
 
     private boolean isRetryableError(Exception e) {
@@ -888,13 +891,13 @@ public class AIService {
             if (results.isEmpty()) {
                 log.error("AI response parsed but no valid questions found. Raw snippet: {}",
                         safeSnippet(rawJson));
-                throw new RuntimeException("Failed to parse AI-generated questions. Please try again.");
+                throw new ServiceUnavailableException("Failed to parse AI-generated questions. Please try again.");
             }
 
             return results;
         } catch (Exception e) {
             log.error("Failed to parse AI response: {}. Raw snippet: {}", e.getMessage(), safeSnippet(rawJson));
-            throw new RuntimeException("Failed to parse AI-generated questions. Please try again.");
+            throw new ServiceUnavailableException("Failed to parse AI-generated questions. Please try again.");
         }
     }
 

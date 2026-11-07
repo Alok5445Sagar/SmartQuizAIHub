@@ -15,6 +15,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
+@org.springframework.validation.annotation.Validated
 @RestController
 @RequestMapping("/api/mcq")
 public class MCQController {
@@ -29,13 +30,13 @@ public class MCQController {
     }
 
     @PostMapping
-    public ResponseEntity<?> createMCQ(@RequestBody MCQDTO.CreateRequest req, Authentication auth) {
+    public ResponseEntity<?> createMCQ(@jakarta.validation.Valid @RequestBody MCQDTO.CreateRequest req, Authentication auth) {
         return ResponseEntity.ok(mcqService.createMCQ(auth.getName(), req));
     }
 
     @PutMapping("/{id}")
     public ResponseEntity<?> updateMCQ(@PathVariable Long id,
-                                        @RequestBody MCQDTO.UpdateRequest req,
+                                        @jakarta.validation.Valid @RequestBody MCQDTO.UpdateRequest req,
                                         Authentication auth) {
         return ResponseEntity.ok(mcqService.updateMCQ(auth.getName(), id, req, isAdmin(auth.getName())));
     }
@@ -48,8 +49,8 @@ public class MCQController {
 
     @GetMapping("/my-questions")
     public ResponseEntity<Page<MCQDTO.Response>> getMyQuestions(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "0") @jakarta.validation.constraints.Min(0) int page,
+            @RequestParam(defaultValue = "10") @jakarta.validation.constraints.Min(1) @jakarta.validation.constraints.Max(100) int size,
             @RequestParam(required = false) Long stackId,
             @RequestParam(required = false) Long topicId,
             @RequestParam(required = false) String difficulty,
@@ -62,8 +63,8 @@ public class MCQController {
 
     @GetMapping("/my-pending-reviews")
     public ResponseEntity<Page<MCQDTO.Response>> getMyPendingReviews(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "0") @jakarta.validation.constraints.Min(0) int page,
+            @RequestParam(defaultValue = "10") @jakarta.validation.constraints.Min(1) @jakarta.validation.constraints.Max(100) int size,
             @RequestParam(required = false, defaultValue = "en") String languageCode,
             Authentication auth) {
         return ResponseEntity.ok(mcqService.getMyPendingReviews(auth.getName(), page, size, languageCode));
@@ -97,7 +98,7 @@ public class MCQController {
 
     @PostMapping("/{id}/review")
     public ResponseEntity<?> reviewMCQ(@PathVariable Long id,
-                                        @RequestBody MCQDTO.ReviewRequest req,
+                                        @jakarta.validation.Valid @RequestBody MCQDTO.ReviewRequest req,
                                         Authentication auth) {
         return ResponseEntity.ok(mcqService.reviewMCQ(auth.getName(), id, req));
     }
@@ -114,10 +115,6 @@ public ResponseEntity<?> bulkUpload(@RequestParam("file") MultipartFile file,
                 "errors", e.getErrors(),
                 "message", e.getImported().size() + " questions imported. " + e.getErrors().size() + " rows had errors."
             )
-        );
-    } catch (RuntimeException e) {
-        return ResponseEntity.badRequest().body(
-            java.util.Map.of("message", e.getMessage())
         );
     }
 }

@@ -184,7 +184,7 @@ export default function AdminQuizDashboardPage() {
       const res = await quizAdminAPI.getQuizzes(page, 10);
       setQuizzesData(res.data);
     } catch (err) {
-      toast.error(err.response?.data?.message || t('failedToLoadPublishedQuizzes'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('failedToLoadPublishedQuizzes'));
     } finally {
       setLoadingQuizzes(false);
     }
@@ -213,7 +213,7 @@ export default function AdminQuizDashboardPage() {
         toast(t('noApprovedQuestionsForTopic'));
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || t('failedToLoadApprovedQuestions'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('failedToLoadApprovedQuestions'));
     } finally {
       setLoadingQuestions(false);
     }
@@ -369,7 +369,7 @@ export default function AdminQuizDashboardPage() {
       setSelectedQuestionIds(pickedIds);
       toast.success(`${t('autoPicked')} ${pickedIds.length} ${t('questionsLabel')} (${t('unused')}: ${response.data?.unusedSelectedCount || 0}, ${t('reused')}: ${response.data?.reusedSelectedCount || 0})`);
     } catch (err) {
-      toast.error(err.response?.data?.message || t('autoPickFailed'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('autoPickFailed'));
     } finally {
       setAutoPicking(false);
     }
@@ -403,7 +403,7 @@ export default function AdminQuizDashboardPage() {
       loadHostedTopicOptions();
       setQuizzesPage(0);
     } catch (err) {
-      toast.error(err.response?.data?.message || t('failedToPublishQuiz'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('failedToPublishQuiz'));
     } finally {
       setPublishing(false);
     }
@@ -415,7 +415,7 @@ export default function AdminQuizDashboardPage() {
       toast.success(t('quizClosed'));
       fetchQuizzes(quizzesPage);
     } catch (err) {
-      toast.error(err.response?.data?.message || t('failedToCloseQuiz'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('failedToCloseQuiz'));
     }
   };
 
@@ -425,7 +425,7 @@ export default function AdminQuizDashboardPage() {
       toast.success(t('quizReopenedLeaderboardAvailable'));
       fetchQuizzes(quizzesPage);
     } catch (err) {
-      toast.error(err.response?.data?.message || t('failedToReopenQuiz'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('failedToReopenQuiz'));
     }
   };
 
@@ -441,7 +441,7 @@ export default function AdminQuizDashboardPage() {
       fetchQuizzes(0);
       loadHostedTopicOptions();
     } catch (err) {
-      toast.error(err.response?.data?.message || t('failedToHostClosedQuizAgain'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('failedToHostClosedQuizAgain'));
     }
   };
 
@@ -459,7 +459,7 @@ export default function AdminQuizDashboardPage() {
       window.URL.revokeObjectURL(url);
       toast.success(t('leaderboardDownloaded'));
     } catch (err) {
-      toast.error(err.response?.data?.message || t('failedToDownloadLeaderboard'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('failedToDownloadLeaderboard'));
     }
   };
 
@@ -472,7 +472,7 @@ export default function AdminQuizDashboardPage() {
       setLeaderboardData(res.data);
     } catch (err) {
       setLeaderboardData(null);
-      toast.error(err.response?.data?.message || t('failedToLoadLeaderboard'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('failedToLoadLeaderboard'));
     } finally {
       setLoadingLeaderboard(false);
     }
@@ -489,7 +489,7 @@ export default function AdminQuizDashboardPage() {
       setTopicLeaderboard(res.data);
     } catch (err) {
       setTopicLeaderboard(null);
-      toast.error(err.response?.data?.message || t('failedToLoadTopicLeaderboard'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('failedToLoadTopicLeaderboard'));
     } finally {
       setLoadingTopicLeaderboard(false);
     }
@@ -502,7 +502,7 @@ export default function AdminQuizDashboardPage() {
       setOverallLeaderboard(res.data);
     } catch (err) {
       setOverallLeaderboard(null);
-      toast.error(err.response?.data?.message || t('failedToLoadOverallLeaderboard'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('failedToLoadOverallLeaderboard'));
     } finally {
       setLoadingOverallLeaderboard(false);
     }

@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+@org.springframework.validation.annotation.Validated
 @RestController
 @RequestMapping("/api/admin/quizzes")
 public class QuizAdminController {
@@ -36,15 +37,15 @@ public class QuizAdminController {
 
     @PostMapping("/publish")
     public ResponseEntity<QuizDTO.PublishedQuizSummary> publishQuiz(
-            @RequestBody QuizDTO.PublishRequest request,
+            @jakarta.validation.Valid @RequestBody QuizDTO.PublishRequest request,
             Authentication authentication) {
         return ResponseEntity.ok(quizService.publishQuiz(authentication.getName(), request));
     }
 
     @GetMapping
     public ResponseEntity<Page<QuizDTO.PublishedQuizSummary>> getPublishedQuizzes(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
+            @RequestParam(defaultValue = "0") @jakarta.validation.constraints.Min(0) int page,
+            @RequestParam(defaultValue = "10") @jakarta.validation.constraints.Min(1) @jakarta.validation.constraints.Max(100) int size) {
         return ResponseEntity.ok(quizService.getPublishedQuizzes(page, size));
     }
 

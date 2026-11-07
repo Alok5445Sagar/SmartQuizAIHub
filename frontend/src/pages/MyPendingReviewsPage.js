@@ -24,7 +24,7 @@ function ReviewModal({ mcq, onClose, onDone }) {
       toast.success(action === 'APPROVE' ? `✅ ${t('questionApproved')}` : `❌ ${t('questionRejected')}`);
       onDone();
     } catch (err) {
-      toast.error(err.response?.data?.message || t('reviewFailed'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('reviewFailed'));
     } finally { setLoading(false); }
   };
 

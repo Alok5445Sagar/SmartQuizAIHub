@@ -1,5 +1,10 @@
 package com.smartquiz.service;
 
+import com.smartquiz.exception.NotFoundException;
+import com.smartquiz.exception.ForbiddenException;
+import com.smartquiz.exception.BusinessRuleException;
+import com.smartquiz.exception.UnauthorizedException;
+
 import com.smartquiz.dto.QuizDTO;
 import com.smartquiz.entity.ParticipantDirectMessage;
 import com.smartquiz.entity.User;
@@ -113,14 +118,14 @@ public class ParticipantChatService {
 
     public QuizDTO.ParticipantChatMessageView sendMessage(QuizDTO.ParticipantChatMessageRequest request) {
         if (request == null) {
-            throw new RuntimeException("Chat request is required");
+            throw new BusinessRuleException("Chat request is required");
         }
 
         User sender = validateEmployeeSession(request.getParticipantEnterpriseId(), request.getParticipantAuthToken());
         User recipient = resolveEligibleUser(request.getRecipientEnterpriseId(), sender.getRole());
 
         if (sender.getEnterpriseId().equals(recipient.getEnterpriseId())) {
-            throw new RuntimeException("Cannot send chat message to yourself");
+            throw new BusinessRuleException("Cannot send chat message to yourself");
         }
 
         String normalizedText = normalizeMessage(request.getMessage(), false);
@@ -169,13 +174,13 @@ public class ParticipantChatService {
         User recipient = resolveEligibleUser(recipientEnterpriseId, sender.getRole());
 
         if (sender.getEnterpriseId().equals(recipient.getEnterpriseId())) {
-            throw new RuntimeException("Cannot send chat message to yourself");
+            throw new BusinessRuleException("Cannot send chat message to yourself");
         }
         if (file == null || file.isEmpty()) {
-            throw new RuntimeException("Attachment file is required");
+            throw new BusinessRuleException("Attachment file is required");
         }
         if (file.getSize() > MAX_ATTACHMENT_BYTES) {
-            throw new RuntimeException("Attachment exceeds 10MB size limit");
+            throw new BusinessRuleException("Attachment exceeds 10MB size limit");
         }
 
         String normalizedMessage = normalizeMessage(message, true);
@@ -217,28 +222,28 @@ public class ParticipantChatService {
 
     public ChatAttachmentDownload downloadAttachment(Long messageId, String participantEnterpriseId, String participantAuthToken) {
         if (messageId == null) {
-            throw new RuntimeException("Message ID is required");
+            throw new BusinessRuleException("Message ID is required");
         }
 
         User self = validateEmployeeSession(participantEnterpriseId, participantAuthToken);
         ParticipantDirectMessage message = participantDirectMessageRepository.findById(messageId)
-                .orElseThrow(() -> new RuntimeException("Attachment message not found"));
+                .orElseThrow(() -> new NotFoundException("Attachment message not found"));
 
         boolean isParticipant = self.getEnterpriseId().equals(message.getSenderEnterpriseId())
                 || self.getEnterpriseId().equals(message.getRecipientEnterpriseId());
         if (!isParticipant) {
-            throw new RuntimeException("Not authorized to access this attachment");
+            throw new ForbiddenException("Not authorized to access this attachment");
         }
 
         if (!StringUtils.hasText(message.getAttachmentStoragePath())) {
-            throw new RuntimeException("No attachment found for this message");
+            throw new NotFoundException("No attachment found for this message");
         }
 
         try {
             Path path = Paths.get(message.getAttachmentStoragePath()).toAbsolutePath().normalize();
             Resource resource = new UrlResource(path.toUri());
             if (!resource.exists() || !resource.isReadable()) {
-                throw new RuntimeException("Attachment file is not available");
+                throw new NotFoundException("Attachment file is not available");
             }
 
             String contentType = StringUtils.hasText(message.getAttachmentContentType())
@@ -250,7 +255,7 @@ public class ParticipantChatService {
 
             return new ChatAttachmentDownload(resource, fileName, contentType);
         } catch (MalformedURLException ex) {
-            throw new RuntimeException("Invalid attachment path");
+            throw new BusinessRuleException("Invalid attachment path");
         }
     }
 
@@ -277,7 +282,7 @@ public class ParticipantChatService {
             broadcastPresenceUpdate();
         } catch (IOException ex) {
             removeEmitter(enterpriseId, emitter);
-            throw new RuntimeException("Unable to establish chat stream");
+            throw new IllegalStateException("Unable to establish chat stream");
         }
 
         return emitter;
@@ -298,7 +303,7 @@ public class ParticipantChatService {
     private void sendPresenceUpdateToUser(String enterpriseId) {
         try {
             User self = userRepository.findByEnterpriseId(enterpriseId)
-                    .orElseThrow(() -> new RuntimeException("User not found"));
+                    .orElseThrow(() -> new NotFoundException("User not found"));
             List<User> candidates = userRepository.findByRoleInOrderByFullNameAsc(CHAT_ROLES);
             List<QuizDTO.ParticipantChatUserSummary> users = new ArrayList<>();
             for (User candidate : candidates) {
@@ -363,7 +368,7 @@ public class ParticipantChatService {
 
     public void publishTyping(QuizDTO.ParticipantChatTypingRequest request) {
         if (request == null) {
-            throw new RuntimeException("Typing request is required");
+            throw new BusinessRuleException("Typing request is required");
         }
 
         User self = validateEmployeeSession(request.getParticipantEnterpriseId(), request.getParticipantAuthToken());
@@ -392,7 +397,7 @@ public class ParticipantChatService {
     @Transactional
     public void markConversationRead(QuizDTO.ParticipantChatReadRequest request) {
         if (request == null) {
-            throw new RuntimeException("Read request is required");
+            throw new BusinessRuleException("Read request is required");
         }
 
         User self = validateEmployeeSession(request.getParticipantEnterpriseId(), request.getParticipantAuthToken());
@@ -428,27 +433,27 @@ public class ParticipantChatService {
 
     private User validateEmployeeSession(String participantEnterpriseId, String participantAuthToken) {
         if (participantEnterpriseId == null || participantEnterpriseId.isBlank()) {
-            throw new RuntimeException("Employee enterprise ID is required");
+            throw new BusinessRuleException("Employee enterprise ID is required");
         }
         if (participantAuthToken == null || participantAuthToken.isBlank()) {
-            throw new RuntimeException("Employee auth token is required");
+            throw new UnauthorizedException("Employee auth token is required");
         }
 
         String expectedEnterpriseId = participantEnterpriseId.trim();
 
         if (!jwtUtils.validateToken(participantAuthToken)) {
-            throw new RuntimeException("Employee session is invalid or expired");
+            throw new UnauthorizedException("Employee session is invalid or expired");
         }
         String tokenEnterpriseId = jwtUtils.getEnterpriseIdFromToken(participantAuthToken);
         if (!expectedEnterpriseId.equals(tokenEnterpriseId)) {
-            throw new RuntimeException("Employee session does not match the selected enterprise ID");
+            throw new UnauthorizedException("Employee session does not match the selected enterprise ID");
         }
 
         User user = userRepository.findByEnterpriseId(expectedEnterpriseId)
-                .orElseThrow(() -> new RuntimeException("Employee not found"));
+                .orElseThrow(() -> new NotFoundException("Employee not found"));
 
         if (!CHAT_ROLES.contains(user.getRole())) {
-            throw new RuntimeException("Current role is not allowed to use chat");
+            throw new ForbiddenException("Current role is not allowed to use chat");
         }
 
         return user;
@@ -456,16 +461,16 @@ public class ParticipantChatService {
 
     private User resolveEligibleUser(String enterpriseId, User.Role senderRole) {
         if (enterpriseId == null || enterpriseId.isBlank()) {
-            throw new RuntimeException("Recipient enterprise ID is required");
+            throw new BusinessRuleException("Recipient enterprise ID is required");
         }
         User user = userRepository.findByEnterpriseId(enterpriseId.trim())
-                .orElseThrow(() -> new RuntimeException("Recipient not found"));
+                .orElseThrow(() -> new NotFoundException("Recipient not found"));
 
         if (!CHAT_ROLES.contains(user.getRole())) {
-            throw new RuntimeException("Recipient is not available for participant chat");
+            throw new BusinessRuleException("Recipient is not available for participant chat");
         }
         if (!canChatWith(senderRole, user.getRole())) {
-            throw new RuntimeException("Recipient is not allowed for your role");
+            throw new ForbiddenException("Recipient is not allowed for your role");
         }
         return user;
     }
@@ -566,13 +571,13 @@ public class ParticipantChatService {
 
             String originalFileName = StringUtils.cleanPath(file.getOriginalFilename() == null ? "attachment.bin" : file.getOriginalFilename());
             if (originalFileName.contains("..")) {
-                throw new RuntimeException("Invalid attachment name");
+                throw new BusinessRuleException("Invalid attachment name");
             }
 
             String storedName = System.currentTimeMillis() + "-" + UUID.randomUUID() + "-" + originalFileName.replace(' ', '_');
             Path target = root.resolve(storedName).normalize();
             if (!target.startsWith(root)) {
-                throw new RuntimeException("Invalid attachment path");
+                throw new BusinessRuleException("Invalid attachment path");
             }
 
             Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
@@ -580,7 +585,7 @@ public class ParticipantChatService {
             String contentType = StringUtils.hasText(file.getContentType()) ? file.getContentType() : "application/octet-stream";
             return new StoredAttachment(originalFileName, contentType, file.getSize(), target.toString());
         } catch (IOException ex) {
-            throw new RuntimeException("Failed to store attachment");
+            throw new IllegalStateException("Failed to store attachment");
         }
     }
 
@@ -589,7 +594,7 @@ public class ParticipantChatService {
             if (allowBlank) {
                 return null;
             }
-            throw new RuntimeException("Message text is required");
+            throw new BusinessRuleException("Message text is required");
         }
 
         String normalized = message.trim();
@@ -597,11 +602,11 @@ public class ParticipantChatService {
             if (allowBlank) {
                 return null;
             }
-            throw new RuntimeException("Message text cannot be blank");
+            throw new BusinessRuleException("Message text cannot be blank");
         }
 
         if (normalized.length() > MAX_MESSAGE_LENGTH) {
-            throw new RuntimeException("Message text exceeds allowed length");
+            throw new BusinessRuleException("Message text exceeds allowed length");
         }
 
         return normalized;

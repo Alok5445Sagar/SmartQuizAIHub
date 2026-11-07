@@ -221,7 +221,7 @@ export default function ParticipantPortalPage() {
         });
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || t('failedToLoadParticipantDashboard'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('failedToLoadParticipantDashboard'));
     } finally {
       setHasLoadedInitialDashboard(true);
       if (showGlobalLoader) {
@@ -281,7 +281,7 @@ export default function ParticipantPortalPage() {
       }
       toast.success(`${t('welcomeBack')} ${res.data.fullName}`);
     } catch (err) {
-      toast.error(err.response?.data?.message || t('loginFailed'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('loginFailed'));
     } finally {
       setLoggingIn(false);
     }
@@ -301,7 +301,7 @@ export default function ParticipantPortalPage() {
       setParticipantSession(JSON.stringify(res.data));
       toast.success(`${t('welcomeBack')} ${res.data.fullName}`);
     } catch (err) {
-      toast.error(err.response?.data?.message || t('guestLoginFailed'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('guestLoginFailed'));
     } finally {
       setLoggingIn(false);
     }
@@ -371,7 +371,7 @@ export default function ParticipantPortalPage() {
       });
       applyChatUsers(res.data?.users || []);
     } catch (err) {
-      toast.error(err.response?.data?.message || t('failedToLoadChatUsers'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('failedToLoadChatUsers'));
     }
   };
 
@@ -407,7 +407,7 @@ export default function ParticipantPortalPage() {
       });
     } catch (err) {
       if (!background) {
-        toast.error(err.response?.data?.message || t('failedToLoadChatHistory'));
+        toast.error((err.response?.data?.detail || err.response?.data?.message) || t('failedToLoadChatHistory'));
       }
     } finally {
       if (!background) {
@@ -507,7 +507,7 @@ export default function ParticipantPortalPage() {
         return { ...prev, [selectedChatUserId]: existing.filter((item) => item.messageId !== tempId) };
       });
       setChatText(message);
-      toast.error(err.response?.data?.message || t('failedToSendMessage'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('failedToSendMessage'));
     } finally {
       setChatSending(false);
       sendTypingEvent(false);
@@ -540,7 +540,7 @@ export default function ParticipantPortalPage() {
       }
       toast.success('Attachment sent');
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to upload attachment');
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || 'Failed to upload attachment');
     } finally {
       setChatUploading(false);
       if (attachmentInputRef.current) {

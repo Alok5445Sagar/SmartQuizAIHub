@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.*;
 import java.util.stream.Collectors;
 
+@org.springframework.validation.annotation.Validated
 @RestController
 @RequestMapping("/api/admin")
 public class AdminController {
@@ -24,8 +25,8 @@ public class AdminController {
 
     @GetMapping("/question-bank")
     public ResponseEntity<Page<MCQDTO.Response>> getAllMCQs(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "0") @jakarta.validation.constraints.Min(0) int page,
+            @RequestParam(defaultValue = "10") @jakarta.validation.constraints.Min(1) @jakarta.validation.constraints.Max(100) int size,
             @RequestParam(required = false) Long stackId,
             @RequestParam(required = false) Long topicId,
             @RequestParam(required = false) String difficulty,
@@ -46,7 +47,7 @@ public class AdminController {
 
     @PostMapping("/assign-reviewer/{questionId}")
     public ResponseEntity<?> assignReviewer(@PathVariable Long questionId,
-                                             @RequestBody MCQDTO.AssignReviewerRequest req) {
+                                             @jakarta.validation.Valid @RequestBody MCQDTO.AssignReviewerRequest req) {
         return ResponseEntity.ok(mcqService.assignReviewer(questionId, req.getReviewerEnterpriseId()));
     }
 
@@ -58,7 +59,7 @@ public class AdminController {
 
     @PutMapping("/edit-question/{id}")
     public ResponseEntity<?> editQuestion(@PathVariable Long id,
-                                        @RequestBody MCQDTO.UpdateRequest req,
+                                        @jakarta.validation.Valid @RequestBody MCQDTO.UpdateRequest req,
                                         org.springframework.security.core.Authentication authentication) {
         return ResponseEntity.ok(mcqService.updateMCQ(authentication.getName(), id, req, true));
     }

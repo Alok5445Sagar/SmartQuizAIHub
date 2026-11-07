@@ -36,7 +36,7 @@ export default function LoginPage() {
       const user = await login(enterpriseId, password);
       navigate(user.role === 'ADMIN' ? '/admin/question-bank' : '/my-questions');
     } catch (err) {
-      setError(err.response?.data?.message || t('invalidCredentialsTryAgain'));
+      setError((err.response?.data?.detail || err.response?.data?.message) || t('invalidCredentialsTryAgain'));
     } finally {
       setLoading(false);
     }

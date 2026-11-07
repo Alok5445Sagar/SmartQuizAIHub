@@ -1,5 +1,7 @@
 package com.smartquiz.service;
 
+import com.smartquiz.exception.NotFoundException;
+
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -51,7 +53,7 @@ public class ChatMemoryService {
         }
 
         User user = userRepository.findByEnterpriseId(enterpriseId)
-                .orElseThrow(() -> new RuntimeException("User not found for chat persistence."));
+                .orElseThrow(() -> new NotFoundException("User not found for chat persistence."));
 
         ChatMessage message = new ChatMessage();
         message.setUser(user);
@@ -70,7 +72,7 @@ public class ChatMemoryService {
         }
 
         User user = userRepository.findByEnterpriseId(enterpriseId)
-                .orElseThrow(() -> new RuntimeException("User not found for chat persistence."));
+                .orElseThrow(() -> new NotFoundException("User not found for chat persistence."));
 
         ChatMessage message = new ChatMessage();
         message.setUser(user);

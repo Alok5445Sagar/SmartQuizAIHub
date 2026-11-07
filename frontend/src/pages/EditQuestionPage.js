@@ -29,7 +29,7 @@ function AssignReviewerModal({ mcq, onClose, onDone }) {
       toast.success(t('reviewerAssignedSuccessfully'));
       onDone();
     } catch (err) {
-      toast.error(err.response?.data?.message || t('failedToAssignReviewer'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('failedToAssignReviewer'));
     } finally {
       setLoading(false);
     }
@@ -290,7 +290,7 @@ export default function EditQuestionPage() {
       toast.success(t('questionUpdated'));
       goBack();
     } catch (err) {
-      const msg = err.response?.data?.message || 'Failed to update';
+      const msg = (err.response?.data?.detail || err.response?.data?.message) || 'Failed to update';
       toast.error(msg.includes('uplicate') ? '❌ ' + msg : msg,
         { duration: msg.includes('uplicate') ? 5000 : 3000 });
     } finally { setLoading(false); }
@@ -315,7 +315,7 @@ export default function EditQuestionPage() {
       toast.success(t('questionSubmittedForReview'));
       goBack();
     } catch (err) {
-      const msg = err.response?.data?.message || t('failedToSubmit');
+      const msg = (err.response?.data?.detail || err.response?.data?.message) || t('failedToSubmit');
       toast.error(msg.includes('uplicate') ? '❌ ' + msg : msg,
         { duration: msg.includes('uplicate') ? 5000 : 3000 });
     } finally { setLoading(false); }
@@ -337,7 +337,7 @@ export default function EditQuestionPage() {
       toast.success(t('questionUpdatedPleaseAssignReviewer'));
       setAssignAfterSave(true);
     } catch (err) {
-      const msg = err.response?.data?.message || 'Failed to update';
+      const msg = (err.response?.data?.detail || err.response?.data?.message) || 'Failed to update';
       toast.error(msg.includes('uplicate') ? '❌ ' + msg : msg,
         { duration: msg.includes('uplicate') ? 5000 : 3000 });
     } finally {
@@ -357,7 +357,7 @@ export default function EditQuestionPage() {
       toast.success(t('questionDeletedSuccessfully'));
       goBack();
     } catch (err) {
-      const msg = err.response?.data?.message || t('failedToDeleteQuestion');
+      const msg = (err.response?.data?.detail || err.response?.data?.message) || t('failedToDeleteQuestion');
       toast.error(msg);
     } finally {
       setLoading(false);
@@ -379,7 +379,7 @@ export default function EditQuestionPage() {
       });
       toast.success(t('translationSuggestionGeneratedReviewBeforeSaving'));
     } catch (err) {
-      toast.error(err.response?.data?.message || t('failedToGenerateTranslation'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('failedToGenerateTranslation'));
     } finally {
       setLoadingTranslation(false);
     }
@@ -395,7 +395,7 @@ export default function EditQuestionPage() {
       toast.success(t('translationSavedSuccessfully'));
       loadTranslations(id);
     } catch (err) {
-      toast.error(err.response?.data?.message || t('failedToSaveTranslation'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('failedToSaveTranslation'));
     } finally {
       setSavingTranslation(false);
     }

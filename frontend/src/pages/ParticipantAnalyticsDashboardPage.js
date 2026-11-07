@@ -92,7 +92,7 @@ export default function ParticipantAnalyticsDashboardPage() {
       setParticipantAnalytics(res.data);
     } catch (err) {
       setParticipantAnalytics(null);
-      toast.error(err.response?.data?.message || t('failedToLoadParticipantAnalytics'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('failedToLoadParticipantAnalytics'));
     } finally {
       setLoadingParticipantAnalytics(false);
     }

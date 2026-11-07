@@ -2,6 +2,10 @@ package com.smartquiz.dto;
 
 import com.smartquiz.entity.MCQ;
 import com.smartquiz.entity.MCQTranslation;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 import lombok.AllArgsConstructor;
 import lombok.NoArgsConstructor;
@@ -14,17 +18,29 @@ public class MCQDTO {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class CreateRequest {
+        @NotBlank(message = "Question stem is required") @Size(max = 4000, message = "Question stem cannot exceed 4000 characters")
         private String questionStem;
+        @Pattern(regexp = "(?i)MCQ|MSQ", message = "Question type must be MCQ or MSQ")
         private String questionType; // "MCQ" or "MSQ"
+        @NotNull(message = "Technology stack is required")
         private Long stackId;
+        @NotNull(message = "Topic is required")
         private Long topicId;
+        @NotBlank(message = "Difficulty is required") @Pattern(regexp = "Easy|Medium|Hard", message = "Difficulty must be Easy, Medium or Hard")
         private String difficulty;
+        @NotBlank(message = "Option A is required") @Size(max = 255, message = "Option A cannot exceed 255 characters")
         private String optionA;
+        @NotBlank(message = "Option B is required") @Size(max = 255, message = "Option B cannot exceed 255 characters")
         private String optionB;
+        @NotBlank(message = "Option C is required") @Size(max = 255, message = "Option C cannot exceed 255 characters")
         private String optionC;
+        @NotBlank(message = "Option D is required") @Size(max = 255, message = "Option D cannot exceed 255 characters")
         private String optionD;
+        @Size(max = 255, message = "Option E cannot exceed 255 characters")
         private String optionE;
+        @Size(max = 255, message = "Option F cannot exceed 255 characters")
         private String optionF;
+        @NotBlank(message = "Correct answer is required")
         private String correctAnswer; // "A" for MCQ, "A,C" for MSQ
         private boolean sendForReview;
         private boolean aiGenerated = false;
@@ -34,17 +50,29 @@ public class MCQDTO {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class UpdateRequest {
+        @NotBlank(message = "Question stem is required") @Size(max = 4000, message = "Question stem cannot exceed 4000 characters")
         private String questionStem;
+        @Pattern(regexp = "(?i)MCQ|MSQ", message = "Question type must be MCQ or MSQ")
         private String questionType;
+        @NotNull(message = "Technology stack is required")
         private Long stackId;
+        @NotNull(message = "Topic is required")
         private Long topicId;
+        @NotBlank(message = "Difficulty is required") @Pattern(regexp = "Easy|Medium|Hard", message = "Difficulty must be Easy, Medium or Hard")
         private String difficulty;
+        @NotBlank(message = "Option A is required") @Size(max = 255, message = "Option A cannot exceed 255 characters")
         private String optionA;
+        @NotBlank(message = "Option B is required") @Size(max = 255, message = "Option B cannot exceed 255 characters")
         private String optionB;
+        @NotBlank(message = "Option C is required") @Size(max = 255, message = "Option C cannot exceed 255 characters")
         private String optionC;
+        @NotBlank(message = "Option D is required") @Size(max = 255, message = "Option D cannot exceed 255 characters")
         private String optionD;
+        @Size(max = 255, message = "Option E cannot exceed 255 characters")
         private String optionE;
+        @Size(max = 255, message = "Option F cannot exceed 255 characters")
         private String optionF;
+        @NotBlank(message = "Correct answer is required")
         private String correctAnswer;
         private boolean sendForReview;
     }
@@ -126,7 +154,9 @@ public class MCQDTO {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class ReviewRequest {
+        @NotBlank(message = "Action is required") @Pattern(regexp = "APPROVE|REJECT", message = "Action must be APPROVE or REJECT")
         private String action; // APPROVE or REJECT
+        @Size(max = 4000, message = "Comments cannot exceed 4000 characters")
         private String comments;
     }
 
@@ -134,6 +164,7 @@ public class MCQDTO {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class AssignReviewerRequest {
+        @NotBlank(message = "Reviewer is required")
         private String reviewerEnterpriseId;
     }
 

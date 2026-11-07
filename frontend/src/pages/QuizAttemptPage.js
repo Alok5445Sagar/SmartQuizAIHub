@@ -95,7 +95,7 @@ export default function QuizAttemptPage() {
         toast.success(quizRes.data.participantNotice);
       }
     } catch (err) {
-      setError(err.response?.data?.message || t('failedToLoadQuizLink'));
+      setError((err.response?.data?.detail || err.response?.data?.message) || t('failedToLoadQuizLink'));
     } finally {
       setLoading(false);
     }
@@ -152,7 +152,7 @@ export default function QuizAttemptPage() {
       setAttemptStep(2);
       toast.success(`${t('signedInAs')} ${res.data.fullName}`);
     } catch (err) {
-      toast.error(err.response?.data?.message || t('employeeLoginFailed'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('employeeLoginFailed'));
       setEmployeeProfile(null);
     } finally {
       setEmployeeLoggingIn(false);
@@ -292,7 +292,7 @@ export default function QuizAttemptPage() {
       const leaderboardRes = await quizPublicAPI.getLeaderboard(quizCode);
       setLeaderboard(leaderboardRes.data);
     } catch (err) {
-      toast.error(err.response?.data?.message || t('failedToSubmitAttempt'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('failedToSubmitAttempt'));
     } finally {
       setSubmitting(false);
     }
@@ -331,7 +331,7 @@ export default function QuizAttemptPage() {
       const leaderboardRes = await quizPublicAPI.getLeaderboard(quizCode);
       setLeaderboard(leaderboardRes.data);
     } catch (err) {
-      toast.error(err.response?.data?.message || t('autoSubmitFailed'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('autoSubmitFailed'));
     } finally {
       setSubmitting(false);
     }

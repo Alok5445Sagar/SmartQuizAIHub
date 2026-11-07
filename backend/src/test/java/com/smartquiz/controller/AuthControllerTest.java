@@ -60,12 +60,12 @@ public class AuthControllerTest extends BaseTest {
 
     @Test
     @DisplayName("Login with PARTICIPANT account is blocked for platform auth")
-    void login_participantAccount_returns400() throws Exception {
+    void login_participantAccount_returns403() throws Exception {
         mockMvc.perform(post("/api/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(
                         new AuthDTO.LoginRequest("auth.participant", "password123"))))
-                .andExpect(status().isBadRequest())
+                .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.message").value("Participant accounts can only be used on the live quiz page"));
     }
 

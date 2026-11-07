@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+@org.springframework.validation.annotation.Validated
 @RestController
 @RequestMapping("/api/public/quiz")
 public class QuizPublicController {
@@ -31,13 +32,13 @@ public class QuizPublicController {
     @PostMapping("/{quizCode}/participant-login")
     public ResponseEntity<QuizDTO.ParticipantLoginResponse> participantLogin(
             @PathVariable String quizCode,
-            @RequestBody QuizDTO.ParticipantLoginRequest request) {
+            @jakarta.validation.Valid @RequestBody QuizDTO.ParticipantLoginRequest request) {
         return ResponseEntity.ok(quizService.loginParticipant(quizCode, request));
     }
 
     @PostMapping("/participant/login")
     public ResponseEntity<QuizDTO.ParticipantLoginResponse> participantPortalLogin(
-            @RequestBody QuizDTO.ParticipantLoginRequest request) {
+            @jakarta.validation.Valid @RequestBody QuizDTO.ParticipantLoginRequest request) {
         return ResponseEntity.ok(quizService.loginParticipantPortal(request));
     }
 
@@ -52,7 +53,7 @@ public class QuizPublicController {
     @PostMapping("/{quizCode}/attempt")
     public ResponseEntity<QuizDTO.AttemptResultResponse> submitAttempt(
             @PathVariable String quizCode,
-            @RequestBody QuizDTO.SubmitAttemptRequest request) {
+            @jakarta.validation.Valid @RequestBody QuizDTO.SubmitAttemptRequest request) {
         return ResponseEntity.ok(quizService.submitAttempt(quizCode, request));
     }
 
@@ -84,7 +85,7 @@ public class QuizPublicController {
 
     @PostMapping("/participant/chat/send")
     public ResponseEntity<QuizDTO.ParticipantChatMessageView> sendParticipantChatMessage(
-            @RequestBody QuizDTO.ParticipantChatMessageRequest request) {
+            @jakarta.validation.Valid @RequestBody QuizDTO.ParticipantChatMessageRequest request) {
         return ResponseEntity.ok(participantChatService.sendMessage(request));
     }
 

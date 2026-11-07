@@ -714,6 +714,43 @@ void updateMCQ_bulkUploadedBypassesDuplicateCheck() {
             .hasMessageContaining("Duplicate/similar question detected against existing questions");
     }
 
+    @Test
+    @DisplayName("Bulk upload rejects an MCQ whose answer is E")
+    void bulkUpload_mcqWithAnswerE_rejected() throws Exception {
+        MockMultipartFile file = buildBulkUploadFile(stack.getStackName(), "MCQ",
+            "Bulk MCQ with answer E", "A1", "B1", "C1", "D1", "E1", "", "E");
+
+        assertThatThrownBy(() -> mcqService.bulkUpload(sme.getEnterpriseId(), file))
+            .isInstanceOf(com.smartquiz.exception.BusinessRuleException.class)
+            .hasMessageContaining("Row 2")
+            .hasMessageContaining("MCQ correct answer must be one of A, B, C, D");
+    }
+
+    @Test
+    @DisplayName("Bulk upload rejects an MSQ answer that points at an empty option")
+    void bulkUpload_msqPointingAtEmptyOption_rejected() throws Exception {
+        MockMultipartFile file = buildBulkUploadFile(stack.getStackName(), "MSQ",
+            "Bulk MSQ pointing at empty E", "A1", "B1", "C1", "D1", "", "", "A,E");
+
+        assertThatThrownBy(() -> mcqService.bulkUpload(sme.getEnterpriseId(), file))
+            .isInstanceOf(com.smartquiz.exception.BusinessRuleException.class)
+            .hasMessageContaining("Row 2")
+            .hasMessageContaining("must map to a non-empty option");
+    }
+
+    @Test
+    @DisplayName("Bulk upload normalizes a valid MSQ answer to sorted letters")
+    void bulkUpload_msqAnswerNormalized() throws Exception {
+        MockMultipartFile file = buildBulkUploadFile(stack.getStackName(), "MSQ",
+            "Bulk MSQ normalized answer", "A1", "B1", "C1", "D1", "E1", "", "e, a");
+
+        var imported = mcqService.bulkUpload(sme.getEnterpriseId(), file);
+
+        assertThat(imported).hasSize(1);
+        assertThat(imported.get(0).getCorrectAnswer()).isEqualTo("A,E");
+        assertThat(imported.get(0).getQuestionType()).isEqualTo("MSQ");
+    }
+
     // ── HELPERS ───────────────────────────────────────────
 
     private MCQDTO.CreateRequest buildCreate(boolean send) {
@@ -735,6 +772,19 @@ private MockMultipartFile buildBulkUploadFile(String stackName,
                                               String optionC,
                                               String optionD,
                                               String correct) throws Exception {
+    return buildBulkUploadFile(stackName, "MCQ", stem, optionA, optionB, optionC, optionD, "", "", correct);
+}
+
+private MockMultipartFile buildBulkUploadFile(String stackName,
+                                              String questionType,
+                                              String stem,
+                                              String optionA,
+                                              String optionB,
+                                              String optionC,
+                                              String optionD,
+                                              String optionE,
+                                              String optionF,
+                                              String correct) throws Exception {
     try (Workbook workbook = new XSSFWorkbook();
          ByteArrayOutputStream out = new ByteArrayOutputStream()) {
         Sheet sheet = workbook.createSheet("Questions");
@@ -752,14 +802,14 @@ private MockMultipartFile buildBulkUploadFile(String stackName,
         row.createCell(0).setCellValue(stackName);
         row.createCell(1).setCellValue(topic.getTopicName());
         row.createCell(2).setCellValue("Easy");
-        row.createCell(3).setCellValue("MCQ");
+        row.createCell(3).setCellValue(questionType);
         row.createCell(4).setCellValue(stem);
         row.createCell(5).setCellValue(optionA);
         row.createCell(6).setCellValue(optionB);
         row.createCell(7).setCellValue(optionC);
         row.createCell(8).setCellValue(optionD);
-        row.createCell(9).setCellValue("");
-        row.createCell(10).setCellValue("");
+        row.createCell(9).setCellValue(optionE);
+        row.createCell(10).setCellValue(optionF);
         row.createCell(11).setCellValue(correct);
 
         workbook.write(out);

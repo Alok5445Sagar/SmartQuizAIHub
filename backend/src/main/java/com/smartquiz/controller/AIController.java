@@ -1,5 +1,9 @@
 package com.smartquiz.controller;
 
+import com.smartquiz.exception.NotFoundException;
+import com.smartquiz.exception.UnauthorizedException;
+import com.smartquiz.exception.BusinessRuleException;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -59,13 +63,13 @@ public class AIController {
 
     @PostMapping("/generate")
     public ResponseEntity<?> generateQuestions(
-            @RequestBody AIGenerationRequest req,
+            @jakarta.validation.Valid @RequestBody AIGenerationRequest req,
             Authentication auth) {
 
         TechnologyStack stack = stackRepository.findById(req.getStackId())
-                .orElseThrow(() -> new RuntimeException("Stack not found"));
+                .orElseThrow(() -> new NotFoundException("Stack not found"));
         Topic topic = topicRepository.findById(req.getTopicId())
-                .orElseThrow(() -> new RuntimeException("Topic not found"));
+                .orElseThrow(() -> new NotFoundException("Topic not found"));
 
         if (req.getNumberOfQuestions() < 1 || req.getNumberOfQuestions() > 20) {
             return ResponseEntity.badRequest()
@@ -142,7 +146,7 @@ public class AIController {
 
     @PostMapping("/similarity-check")
     public ResponseEntity<SimilarityCheckResponse> checkSimilarity(
-            @RequestBody SimilarityCheckRequest req) {
+            @jakarta.validation.Valid @RequestBody SimilarityCheckRequest req) {
                 try {
                         SimilarityCheckResponse response = aiService.checkSimilarity(
                                         req.getQuestionStem(),
@@ -169,7 +173,7 @@ public class AIController {
                 }
 
                 User user = userRepository.findByEnterpriseId(auth.getName())
-                                .orElseThrow(() -> new RuntimeException("User not found"));
+                                .orElseThrow(() -> new NotFoundException("User not found"));
 
                 String sessionId = chatMemoryService.resolveSessionId(user.getEnterpriseId(), req.getSessionId());
 
@@ -226,12 +230,12 @@ public class AIController {
                 SseEmitter emitter = new SseEmitter(120000L);
 
                 if (auth == null || auth.getName() == null || auth.getName().isBlank()) {
-                        emitter.completeWithError(new RuntimeException("Unauthorized"));
+                        emitter.completeWithError(new UnauthorizedException("Unauthorized"));
                         return emitter;
                 }
 
                 User user = userRepository.findByEnterpriseId(auth.getName())
-                                .orElseThrow(() -> new RuntimeException("User not found"));
+                                .orElseThrow(() -> new NotFoundException("User not found"));
 
                 String sessionId = chatMemoryService.resolveSessionId(user.getEnterpriseId(), req.getSessionId());
 
@@ -283,7 +287,7 @@ public class AIController {
                 }
 
                 User user = userRepository.findByEnterpriseId(auth.getName())
-                                .orElseThrow(() -> new RuntimeException("User not found"));
+                                .orElseThrow(() -> new NotFoundException("User not found"));
 
                 List<String> suggestions;
                 if (user.getRole() == User.Role.ADMIN) {

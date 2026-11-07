@@ -33,7 +33,7 @@ function AssignReviewerModal({ mcq, onClose, onDone }) {
       toast.success(t('reviewerAssignedSuccessfully'));
       onDone();
     } catch (err) {
-      toast.error(err.response?.data?.message || t('failedToAssignReviewer'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('failedToAssignReviewer'));
     } finally { setLoading(false); }
   };
 
@@ -231,7 +231,7 @@ function AdminEditModal({ mcq, onClose, onDone, onOpenAssign }) {
       toast.success(t('questionUpdated'));
       onDone();
     } catch (err) {
-        const msg = err.response?.data?.message || t('failedToUpdate');
+        const msg = (err.response?.data?.detail || err.response?.data?.message) || t('failedToUpdate');
       toast.error(msg.includes('uplicate') ? '❌ ' + msg : msg,
         { duration: msg.includes('uplicate') ? 5000 : 3000 });
     } finally { setLoading(false); }
@@ -264,7 +264,7 @@ function AdminEditModal({ mcq, onClose, onDone, onOpenAssign }) {
       toast.success(t('questionUpdatedSentForReview'));
       onDone();
     } catch (err) {
-        const msg = err.response?.data?.message || t('failedToUpdate');
+        const msg = (err.response?.data?.detail || err.response?.data?.message) || t('failedToUpdate');
       toast.error(msg.includes('uplicate') ? '❌ ' + msg : msg,
         { duration: msg.includes('uplicate') ? 5000 : 3000 });
     } finally { setLoading(false); }

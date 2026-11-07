@@ -146,7 +146,7 @@ class ParticipantChatIntegrationTest extends BaseTest {
         mockMvc.perform(get("/api/public/quiz/participant/chat/attachment/{messageId}", attachmentMessageId)
                         .param("participantEnterpriseId", admin.getEnterpriseId())
                         .param("participantAuthToken", adminToken))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isForbidden());
     }
 
                 @Test
@@ -295,7 +295,7 @@ class ParticipantChatIntegrationTest extends BaseTest {
                                                                                                                                         "message":"Admin to participant should fail"
                                                                                                                                 }
                                                                                                                                 """.formatted(admin.getEnterpriseId(), adminToken, participant.getEnterpriseId())))
-                                                                .andExpect(status().isBadRequest())
+                                                                .andExpect(status().isForbidden())
                                                                 .andExpect(jsonPath("$.message").value("Recipient is not allowed for your role"));
 
                                 mockMvc.perform(post("/api/public/quiz/participant/chat/send")
@@ -308,7 +308,7 @@ class ParticipantChatIntegrationTest extends BaseTest {
                                                                                                                                         "message":"Participant to admin should fail"
                                                                                                                                 }
                                                                                                                                 """.formatted(participant.getEnterpriseId(), participantToken, admin.getEnterpriseId())))
-                                                                .andExpect(status().isBadRequest())
+                                                                .andExpect(status().isForbidden())
                                                                 .andExpect(jsonPath("$.message").value("Recipient is not allowed for your role"));
                 }
 

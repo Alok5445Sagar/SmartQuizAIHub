@@ -24,7 +24,7 @@ export default function AddQuestionPage() {
       toast.success(t('questionSavedAsDraft'));
       navigate('/my-questions');
     } catch (err) {
-      const msg = err.response?.data?.message || t('failedToSaveQuestion');
+      const msg = (err.response?.data?.detail || err.response?.data?.message) || t('failedToSaveQuestion');
       if (msg.toLowerCase().includes('duplicate')) {
         toast.error(`${t('duplicatePrefix')} ${msg}`, { duration: 5000 });
       } else {
@@ -42,7 +42,7 @@ export default function AddQuestionPage() {
       toast.success(t('questionSavedDraftEditForReview'));
       navigate('/my-questions');
     } catch (err) {
-      const msg = err.response?.data?.message || t('failedToSubmitQuestion');
+      const msg = (err.response?.data?.detail || err.response?.data?.message) || t('failedToSubmitQuestion');
       if (msg.toLowerCase().includes('duplicate')) {
         toast.error(`${t('duplicatePrefix')} ${msg}`, { duration: 5000 });
       } else {
@@ -73,7 +73,7 @@ export default function AddQuestionPage() {
         toast(`${res.data.imported.length} ${t('importedRows')}, ${res.data.errors.length} ${t('rowsHadErrors')}.`, { icon: '⚠️' });
       }
     } catch (err) {
-      const msg = err.response?.data?.message || t('bulkUploadFailed');
+      const msg = (err.response?.data?.detail || err.response?.data?.message) || t('bulkUploadFailed');
       setBulkErrors(msg.split('\n'));
       toast.error(t('uploadFailedSeeErrors'));
     } finally {

@@ -1,5 +1,9 @@
 package com.smartquiz.controller;
 
+import com.smartquiz.exception.NotFoundException;
+import com.smartquiz.exception.ForbiddenException;
+import com.smartquiz.exception.BusinessRuleException;
+
 import com.smartquiz.dto.AuthDTO;
 import com.smartquiz.entity.User;
 import com.smartquiz.repository.UserRepository;
@@ -14,6 +18,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Locale;
 
+@org.springframework.validation.annotation.Validated
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
@@ -25,15 +30,15 @@ public class AuthController {
     @Autowired private UserRepository userRepository;
 
     @PostMapping("/login")
-    public ResponseEntity<?> login(@RequestBody AuthDTO.LoginRequest request) {
+    public ResponseEntity<?> login(@jakarta.validation.Valid @RequestBody AuthDTO.LoginRequest request) {
         Authentication authentication = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(request.getEnterpriseId(), request.getPassword())
         );
 
         UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-        User user = userRepository.findByEnterpriseId(request.getEnterpriseId()).orElseThrow();
+        User user = userRepository.findByEnterpriseId(request.getEnterpriseId()).orElseThrow(() -> new NotFoundException("User not found"));
         if (user.getRole() == User.Role.PARTICIPANT) {
-            throw new RuntimeException("Participant accounts can only be used on the live quiz page");
+            throw new ForbiddenException("Participant accounts can only be used on the live quiz page");
         }
         String token = jwtUtils.generateToken(user.getEnterpriseId(), user.getRole().name());
 
@@ -49,7 +54,7 @@ public class AuthController {
     @GetMapping("/me")
     public ResponseEntity<?> getCurrentUser(Authentication authentication) {
         String enterpriseId = authentication.getName();
-        User user = userRepository.findByEnterpriseId(enterpriseId).orElseThrow();
+        User user = userRepository.findByEnterpriseId(enterpriseId).orElseThrow(() -> new NotFoundException("User not found"));
         return ResponseEntity.ok(new AuthDTO.LoginResponse(
                 null,
                 user.getEnterpriseId(),
@@ -60,13 +65,13 @@ public class AuthController {
     }
 
     @PutMapping("/language")
-    public ResponseEntity<?> updatePreferredLanguage(@RequestBody AuthDTO.UpdateLanguageRequest request,
+    public ResponseEntity<?> updatePreferredLanguage(@jakarta.validation.Valid @RequestBody AuthDTO.UpdateLanguageRequest request,
                                                      Authentication authentication) {
         if (request == null) {
-            throw new RuntimeException("Language request is required");
+            throw new BusinessRuleException("Language request is required");
         }
         String enterpriseId = authentication.getName();
-        User user = userRepository.findByEnterpriseId(enterpriseId).orElseThrow();
+        User user = userRepository.findByEnterpriseId(enterpriseId).orElseThrow(() -> new NotFoundException("User not found"));
         user.setPreferredLanguage(normalizeLanguageCode(request.getPreferredLanguage()));
         User saved = userRepository.save(user);
         return ResponseEntity.ok(new AuthDTO.LoginResponse(

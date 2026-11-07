@@ -60,7 +60,7 @@ export default function AIGeneratePage({ onBack }) {
       setResult(res.data);
       toast.success(res.data.message);
     } catch (err) {
-      toast.error(err.response?.data?.message || t('aiGenerationFailedTryAgain'));
+      toast.error((err.response?.data?.detail || err.response?.data?.message) || t('aiGenerationFailedTryAgain'));
     } finally {
       setLoading(false);
     }

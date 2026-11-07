@@ -318,7 +318,7 @@ export default function ChatAssistantWidget() {
       await refreshSessions(activeSessionId);
     } catch (err) {
       const msg =
-        err?.response?.data?.message ||
+        (err?.response?.data?.detail || err?.response?.data?.message) ||
         err?.message ||
         t('chatRequestFailedTryAgain');
       toast.error(msg);
