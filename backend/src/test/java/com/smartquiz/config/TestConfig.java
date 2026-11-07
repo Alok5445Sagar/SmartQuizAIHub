@@ -7,11 +7,21 @@ import org.mockito.Mockito;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
+import org.springframework.boot.autoconfigure.flyway.FlywayMigrationStrategy;
 
 import java.util.Collections;
 
 @TestConfiguration
 public class TestConfig {
+
+    /** Fresh schema for every test context: drop everything, then apply all migrations. */
+    @Bean
+    public FlywayMigrationStrategy cleanMigrateStrategy() {
+        return flyway -> {
+            flyway.clean();
+            flyway.migrate();
+        };
+    }
 
     @Bean
     @Primary

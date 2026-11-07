@@ -17,6 +17,38 @@ import org.springframework.transaction.annotation.Transactional;
 
 public abstract class BaseTest {
 
+    /**
+     * Uses an existing MySQL when TEST_DB_URL is set (local dev), otherwise starts a throwaway
+     * Testcontainers MySQL once per JVM (CI). Each Spring context cleans and re-migrates the schema.
+     */
+    @org.springframework.test.context.DynamicPropertySource
+    static void datasource(org.springframework.test.context.DynamicPropertyRegistry registry) {
+        String url = System.getenv("TEST_DB_URL");
+        if (url != null && !url.isBlank()) {
+            registry.add("spring.datasource.url", () -> url);
+            registry.add("spring.datasource.username", () -> System.getenv("TEST_DB_USERNAME"));
+            registry.add("spring.datasource.password", () -> System.getenv("TEST_DB_PASSWORD"));
+            return;
+        }
+        org.testcontainers.containers.MySQLContainer<?> mysql = MySqlContainerHolder.get();
+        registry.add("spring.datasource.url", mysql::getJdbcUrl);
+        registry.add("spring.datasource.username", mysql::getUsername);
+        registry.add("spring.datasource.password", mysql::getPassword);
+    }
+
+    private static final class MySqlContainerHolder {
+        private static org.testcontainers.containers.MySQLContainer<?> container;
+
+        static synchronized org.testcontainers.containers.MySQLContainer<?> get() {
+            if (container == null) {
+                container = new org.testcontainers.containers.MySQLContainer<>("mysql:8.4")
+                        .withDatabaseName("smart_quiz_hub_test");
+                container.start();
+            }
+            return container;
+        }
+    }
+
     @Autowired protected UserRepository userRepository;
     @Autowired protected TechnologyStackRepository stackRepository;
     @Autowired protected TopicRepository topicRepository;
