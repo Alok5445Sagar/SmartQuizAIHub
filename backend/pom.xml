@@ -167,6 +167,13 @@
             <version>${resilience4j.version}</version>
         </dependency>
 
+        <!-- Prometheus scrape format for /actuator/prometheus -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
         <!-- Local LLM via Ollama -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
@@ -203,6 +210,14 @@
                         </exclude>
                     </excludes>
                 </configuration>
+                <executions>
+                    <!-- Version and build time for /actuator/info -->
+                    <execution>
+                        <goals>
+                            <goal>build-info</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

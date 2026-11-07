@@ -29,6 +29,10 @@ import io.github.resilience4j.retry.Retry;
 import io.github.resilience4j.retry.RetryConfig;
 import io.github.resilience4j.timelimiter.TimeLimiter;
 import io.github.resilience4j.timelimiter.TimeLimiterConfig;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.binder.MeterBinder;
 import jakarta.annotation.PreDestroy;
 
 /**
@@ -36,7 +40,7 @@ import jakarta.annotation.PreDestroy;
  * → bulkhead (CPU inference: one call at a time, a short bounded queue) → time limit → retry on connection errors.
  */
 @Component
-public class AiCallGuard {
+public class AiCallGuard implements MeterBinder {
 
     private static final Logger log = LoggerFactory.getLogger(AiCallGuard.class);
 
@@ -53,6 +57,8 @@ public class AiCallGuard {
     private final Retry retry;
     private final ExecutorService executor;
     private final AtomicInteger inFlight = new AtomicInteger();
+    /** Set by Micrometer when the guard is bound to a registry; metrics are skipped until then. */
+    private volatile MeterRegistry meterRegistry;
 
     @org.springframework.beans.factory.annotation.Autowired
     public AiCallGuard(@Value("${app.ai.max-concurrent:1}") int maxConcurrent,
@@ -105,24 +111,63 @@ public class AiCallGuard {
 
     public <T> T execute(Supplier<T> call) {
         if (!circuitBreaker.tryAcquirePermission()) {
+            record("circuit_open", 0);
             throw unavailable();
         }
         long start = System.nanoTime();
         try {
             T result = runInBulkhead(call);
-            circuitBreaker.onResult(System.nanoTime() - start, java.util.concurrent.TimeUnit.NANOSECONDS, result);
+            long elapsed = System.nanoTime() - start;
+            circuitBreaker.onResult(elapsed, java.util.concurrent.TimeUnit.NANOSECONDS, result);
+            record("success", elapsed);
             return result;
         } catch (BulkheadFullException ex) {
             circuitBreaker.releasePermission();
+            record("busy", System.nanoTime() - start);
             throw new ServiceUnavailableException("The AI assistant is busy with other requests. Please try again shortly.",
                     Math.max(5, settings.callTimeout().toSeconds() / 4));
         } catch (RuntimeException ex) {
-            circuitBreaker.onError(System.nanoTime() - start, java.util.concurrent.TimeUnit.NANOSECONDS, ex);
+            long elapsed = System.nanoTime() - start;
+            circuitBreaker.onError(elapsed, java.util.concurrent.TimeUnit.NANOSECONDS, ex);
             if (ex instanceof AiTimeoutException) {
+                record("timeout", elapsed);
                 throw new ServiceUnavailableException(
                         "Local AI model timed out. Try fewer questions or increase AI_CALL_TIMEOUT.", ex);
             }
+            record("error", elapsed);
             throw ex;
+        }
+    }
+
+    /**
+     * smartquiz.ai.calls (timer, tag outcome: success, error, timeout, busy, circuit_open) includes queue time;
+     * smartquiz.ai.circuit.state is 0 closed, 1 open, 2 half-open, 3 other; smartquiz.ai.calls.in.flight
+     * counts running plus queued calls.
+     */
+    @Override
+    public void bindTo(MeterRegistry registry) {
+        Gauge.builder("smartquiz.ai.circuit.state", circuitBreaker, cb -> switch (cb.getState()) {
+                    case CLOSED -> 0;
+                    case OPEN -> 1;
+                    case HALF_OPEN -> 2;
+                    default -> 3;
+                })
+                .description("Ollama circuit breaker: 0 closed, 1 open, 2 half-open, 3 other")
+                .register(registry);
+        Gauge.builder("smartquiz.ai.calls.in.flight", inFlight, AtomicInteger::get)
+                .description("AI calls running or waiting for the model")
+                .register(registry);
+        this.meterRegistry = registry;
+    }
+
+    private void record(String outcome, long nanos) {
+        MeterRegistry registry = meterRegistry;
+        if (registry != null) {
+            Timer.builder("smartquiz.ai.calls")
+                    .description("Calls to the local model, including time spent waiting for a free slot")
+                    .tag("outcome", outcome)
+                    .register(registry)
+                    .record(nanos, java.util.concurrent.TimeUnit.NANOSECONDS);
         }
     }
 

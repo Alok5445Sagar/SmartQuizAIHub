@@ -1,6 +1,8 @@
 package com.smartquiz.config;
 
+import com.smartquiz.observability.RequestIdFilter;
 import com.smartquiz.security.JwtAuthFilter;
+import com.smartquiz.security.MetricsScrapeTokenFilter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -34,6 +36,9 @@ public class SecurityConfig {
 
     @Autowired
     private JwtAuthFilter jwtAuthFilter;
+
+    @Value("${app.metrics.scrape-token:}")
+    private String metricsScrapeToken;
 
     @Value("${app.cors.allowed-origins}")
     private String allowedOrigins;
@@ -70,7 +75,8 @@ public class SecurityConfig {
                 // Re-dispatches (SSE completion, error pages) were already authorized on the original request.
                 .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                 .requestMatchers("/api/auth/login").permitAll()
-                .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll()
+                .requestMatchers(MetricsScrapeTokenFilter.PATH).hasAnyRole("ADMIN", "METRICS")
                 // The SSE stream authenticates with a one-time ticket; every other chat call needs a JWT.
                 .requestMatchers("/api/public/quiz/participant/chat/stream").permitAll()
                 .requestMatchers("/api/public/quiz/participant/chat/**").authenticated()
@@ -80,7 +86,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/mcq/**", "/api/ai/**", "/api/reference/**").hasAnyRole("SME", "ADMIN")
                 .anyRequest().authenticated()
             )
-        .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+        .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+        .addFilterBefore(new MetricsScrapeTokenFilter(metricsScrapeToken), JwtAuthFilter.class);
 
         return http.build();
     }
@@ -89,9 +96,12 @@ public class SecurityConfig {
                                      String detail, String instance) throws IOException {
         response.setStatus(status);
         response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+        // The request id is limited to [A-Za-z0-9._-] by RequestIdFilter, so it needs no escaping.
+        String requestId = RequestIdFilter.current();
         response.getWriter().write("{\"type\":\"about:blank\",\"title\":\"" + title + "\",\"status\":" + status
                 + ",\"detail\":\"" + detail + "\",\"message\":\"" + detail + "\",\"instance\":\""
-                + instance.replace("\\", "\\\\").replace("\"", "\\\"") + "\"}");
+                + instance.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+                + (requestId == null ? "" : ",\"requestId\":\"" + requestId + "\"") + "}");
     }
 
     @Bean

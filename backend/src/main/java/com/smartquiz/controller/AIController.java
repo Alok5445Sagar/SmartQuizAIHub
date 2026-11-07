@@ -54,6 +54,7 @@ public class AIController {
     @Autowired private AiGenerationJobService generationJobService;
     @Autowired private UserRepository userRepository;
         @Autowired private ChatMemoryService chatMemoryService;
+        @Autowired private com.smartquiz.observability.ActiveStreams activeStreams;
         @Autowired @org.springframework.beans.factory.annotation.Qualifier("chatStreamExecutor")
         private org.springframework.core.task.TaskExecutor chatStreamExecutor;
         @org.springframework.beans.factory.annotation.Value("${app.ai.stream-timeout:330s}")
@@ -178,9 +179,19 @@ public class AIController {
                 String sessionId = chatMemoryService.resolveSessionId(enterpriseId, req.getSessionId());
 
                 AtomicBoolean cancelled = new AtomicBoolean(false);
-                emitter.onCompletion(() -> cancelled.set(true));
-                emitter.onTimeout(() -> cancelled.set(true));
-                emitter.onError(ex -> cancelled.set(true));
+                activeStreams.register(com.smartquiz.observability.ActiveStreams.Type.AI_CHAT, emitter);
+                emitter.onCompletion(() -> {
+                        cancelled.set(true);
+                        activeStreams.unregister(emitter);
+                });
+                emitter.onTimeout(() -> {
+                        cancelled.set(true);
+                        activeStreams.unregister(emitter);
+                });
+                emitter.onError(ex -> {
+                        cancelled.set(true);
+                        activeStreams.unregister(emitter);
+                });
 
                 try {
                         chatStreamExecutor.execute(() -> runChatStream(emitter, cancelled, req, enterpriseId, sessionId, assistantRole));

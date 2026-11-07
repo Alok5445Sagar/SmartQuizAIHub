@@ -67,6 +67,9 @@ public class ParticipantChatService {
 
     private final Map<String, CopyOnWriteArrayList<SseEmitter>> activeEmittersByEnterpriseId = new ConcurrentHashMap<>();
 
+    @Autowired
+    private com.smartquiz.observability.ActiveStreams activeStreams;
+
     public QuizDTO.ParticipantChatUsersResponse getChatUsers(String selfEnterpriseId) {
         User self = requireChatUser(selfEnterpriseId);
 
@@ -269,6 +272,7 @@ public class ParticipantChatService {
         String enterpriseId = self.getEnterpriseId();
 
         activeEmittersByEnterpriseId.computeIfAbsent(enterpriseId, unused -> new CopyOnWriteArrayList<>()).add(emitter);
+        activeStreams.register(com.smartquiz.observability.ActiveStreams.Type.PARTICIPANT_CHAT, emitter);
 
         emitter.onCompletion(() -> removeEmitter(enterpriseId, emitter));
         emitter.onTimeout(() -> {
@@ -292,6 +296,7 @@ public class ParticipantChatService {
     }
 
     private void removeEmitter(String enterpriseId, SseEmitter emitter) {
+        activeStreams.unregister(emitter);
         CopyOnWriteArrayList<SseEmitter> emitters = activeEmittersByEnterpriseId.get(enterpriseId);
         if (emitters == null) {
             return;
@@ -362,6 +367,7 @@ public class ParticipantChatService {
         }
 
         if (!failed.isEmpty()) {
+            failed.forEach(activeStreams::unregister);
             emitters.removeAll(failed);
             if (emitters.isEmpty()) {
                 activeEmittersByEnterpriseId.remove(enterpriseId);

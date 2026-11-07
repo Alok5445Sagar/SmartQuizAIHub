@@ -18,6 +18,7 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.core.task.TaskRejectedException;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.security.concurrent.DelegatingSecurityContextRunnable;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -39,6 +40,10 @@ import com.smartquiz.exception.TooManyRequestsException;
 import com.smartquiz.repository.AiGenerationJobRepository;
 import com.smartquiz.repository.TechnologyStackRepository;
 import com.smartquiz.repository.TopicRepository;
+
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 
 /**
  * Runs AI question generation in the background so the HTTP request returns at once (202 + job id)
@@ -65,6 +70,7 @@ public class AiGenerationJobService {
     private final AiGenerationJobRepository jobRepository;
     private final TaskExecutor jobExecutor;
     private final Duration retention;
+    private final MeterRegistry meterRegistry;
 
     public AiGenerationJobService(@Lazy AIService aiService,
                                   MCQService mcqService,
@@ -72,7 +78,8 @@ public class AiGenerationJobService {
                                   TopicRepository topicRepository,
                                   AiGenerationJobRepository jobRepository,
                                   @Qualifier("aiJobExecutor") TaskExecutor jobExecutor,
-                                  @Value("${app.ai.job-retention:7d}") Duration retention) {
+                                  @Value("${app.ai.job-retention:7d}") Duration retention,
+                                  MeterRegistry meterRegistry) {
         this.aiService = aiService;
         this.mcqService = mcqService;
         this.stackRepository = stackRepository;
@@ -80,6 +87,12 @@ public class AiGenerationJobService {
         this.jobRepository = jobRepository;
         this.jobExecutor = jobExecutor;
         this.retention = retention;
+        this.meterRegistry = meterRegistry;
+        if (jobExecutor instanceof ThreadPoolTaskExecutor pool) {
+            Gauge.builder("smartquiz.ai.generation.jobs.queued", pool, p -> p.getThreadPoolExecutor().getQueue().size())
+                    .description("Generation jobs waiting for the worker")
+                    .register(meterRegistry);
+        }
     }
 
     /** Validates the request, stores a QUEUED job and hands it to the worker. */
@@ -118,6 +131,7 @@ public class AiGenerationJobService {
             jobExecutor.execute(new DelegatingSecurityContextRunnable(() -> run(jobId), callerContext));
         } catch (TaskRejectedException e) {
             jobRepository.deleteById(jobId);
+            countJob("rejected");
             throw new TooManyRequestsException("The AI generation queue is full. Try again in a minute.", 60);
         }
         return toResponse(job);
@@ -166,6 +180,8 @@ public class AiGenerationJobService {
             job.setStatus(Status.SUCCEEDED);
             job.setFinishedAt(LocalDateTime.now());
             jobRepository.save(job);
+            countJob("succeeded");
+            timeJob(job, "succeeded");
         } catch (ApiException e) {
             fail(job, e.getMessage());
         } catch (RuntimeException e) {
@@ -191,6 +207,21 @@ public class AiGenerationJobService {
         job.setStatus(Status.FAILED);
         job.setFinishedAt(LocalDateTime.now());
         jobRepository.save(job);
+        countJob("failed");
+        timeJob(job, "failed");
+    }
+
+    /** smartquiz.ai.generation.jobs: finished or rejected jobs by outcome (succeeded, failed, rejected). */
+    private void countJob(String outcome) {
+        meterRegistry.counter("smartquiz.ai.generation.jobs", "outcome", outcome).increment();
+    }
+
+    /** Run time of a job from start to finish (queue time excluded). */
+    private void timeJob(AiGenerationJob job, String outcome) {
+        if (job.getStartedAt() != null && job.getFinishedAt() != null) {
+            Timer.builder("smartquiz.ai.generation.jobs.duration").tag("outcome", outcome).register(meterRegistry)
+                    .record(Duration.between(job.getStartedAt(), job.getFinishedAt()));
+        }
     }
 
     private AiGenerationJobResponse toResponse(AiGenerationJob job) {

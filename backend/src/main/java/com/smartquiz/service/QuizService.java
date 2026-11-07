@@ -61,6 +61,7 @@ public class QuizService {
     @Autowired private UserRepository userRepository;
     @Autowired private com.smartquiz.security.LoginAttemptGuard loginAttemptGuard;
     @Autowired private JwtUtils jwtUtils;
+    @Autowired private io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
     @PreAuthorize("hasRole('ADMIN')")
 
@@ -815,6 +816,7 @@ public class QuizService {
 
         String key = QuizAttempt.participantKey(enterpriseId, name);
         if (quizAttemptRepository.existsByQuizAndParticipantKey(quiz, key)) {
+            countRejected("already_attempted");
             throw new ConflictException(alreadyAttemptedMessage(enterpriseId));
         }
 
@@ -837,8 +839,10 @@ public class QuizService {
             }
         }
         if (session.getSubmittedAt() != null) {
+            countRejected("already_attempted");
             throw new ConflictException(alreadyAttemptedMessage(enterpriseId));
         }
+        meterRegistry.counter("smartquiz.quiz.attempts.started", "resumed", String.valueOf(resumed)).increment();
 
         int durationSeconds = quizDurationSeconds(quiz);
         int elapsed = (int) Math.min(durationSeconds, secondsSince(session.getStartedAt()));
@@ -886,6 +890,7 @@ public class QuizService {
 
         if (session.getSubmittedAt() != null
                 || quizAttemptRepository.existsByQuizAndParticipantKey(quiz, session.getParticipantKey())) {
+            countRejected("already_submitted");
             throw new ConflictException("This attempt has already been submitted");
         }
 
@@ -934,6 +939,7 @@ public class QuizService {
         try {
             savedAttempt = quizAttemptRepository.saveAndFlush(attempt);
         } catch (DataIntegrityViolationException duplicate) {
+            countRejected("already_submitted");
             throw new ConflictException("This attempt has already been submitted", duplicate);
         }
 
@@ -975,6 +981,7 @@ public class QuizService {
 
         session.setSubmittedAt(LocalDateTime.now());
         quizAttemptSessionRepository.save(session);
+        meterRegistry.counter("smartquiz.quiz.attempts.submitted", "auto", String.valueOf(autoSubmitted)).increment();
 
         return new QuizDTO.AttemptResultResponse(
                 updatedAttempt.getAttemptId(),
@@ -987,6 +994,11 @@ public class QuizService {
                 updatedAttempt.isAutoSubmitted(),
                 updatedAttempt.getSubmittedAt()
         );
+    }
+
+    /** smartquiz.quiz.attempts.rejected: starts or submits refused because the participant already finished. */
+    private void countRejected(String reason) {
+        meterRegistry.counter("smartquiz.quiz.attempts.rejected", "reason", reason).increment();
     }
 
     private static String alreadyAttemptedMessage(String enterpriseId) {

@@ -122,6 +122,9 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
                 && (pd.getProperties() == null || !pd.getProperties().containsKey("message"))) {
             pd.setProperty("message", pd.getDetail());
         }
+        if (body instanceof ProblemDetail pd) {
+            addRequestId(pd);
+        }
         return super.createResponseEntity(body, headers, statusCode, request);
     }
 
@@ -133,6 +136,14 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return problemEntity(status, detail, request.getRequestURI(), errors);
     }
 
+    /** Lets users quote an id from the error that support can find in the logs. */
+    private static void addRequestId(ProblemDetail pd) {
+        String requestId = com.smartquiz.observability.RequestIdFilter.current();
+        if (requestId != null) {
+            pd.setProperty("requestId", requestId);
+        }
+    }
+
     private ResponseEntity<Object> problemEntity(HttpStatus status, String detail, String instance, Map<String, String> errors) {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(status, detail);
         pd.setTitle(status.getReasonPhrase());
@@ -140,6 +151,7 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             pd.setInstance(URI.create(instance.startsWith("uri=") ? instance.substring(4) : instance));
         }
         pd.setProperty("message", detail);
+        addRequestId(pd);
         if (errors != null && !errors.isEmpty()) {
             pd.setProperty("errors", errors);
         }

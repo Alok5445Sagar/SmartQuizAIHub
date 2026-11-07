@@ -143,6 +143,50 @@ class AiCallGuardTest {
         assertThat(g.circuitState()).isEqualTo(CircuitBreaker.State.CLOSED);
     }
 
+    @Test
+    @DisplayName("records call outcomes, circuit state and queue depth as metrics")
+    void recordsMetrics() throws Exception {
+        AiCallGuard g = guard(0, Duration.ofMillis(100), 3);
+        io.micrometer.core.instrument.simple.SimpleMeterRegistry registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        g.bindTo(registry);
+
+        g.execute(() -> "ok");
+        assertThatThrownBy(() -> g.execute(() -> { throw new IllegalStateException("boom"); }));
+        assertThatThrownBy(() -> g.execute(() -> sleep(1_000)));
+        // Two failures out of three calls (minimum 3): the breaker is now open.
+        assertThatThrownBy(() -> g.execute(() -> "rejected"));
+
+        assertThat(registry.get("smartquiz.ai.calls").tag("outcome", "success").timer().count()).isEqualTo(1);
+        assertThat(registry.get("smartquiz.ai.calls").tag("outcome", "error").timer().count()).isEqualTo(1);
+        assertThat(registry.get("smartquiz.ai.calls").tag("outcome", "timeout").timer().count()).isEqualTo(1);
+        assertThat(registry.get("smartquiz.ai.calls").tag("outcome", "circuit_open").timer().count()).isEqualTo(1);
+        // 0 = closed, 1 = open, 2 = half-open
+        assertThat(registry.get("smartquiz.ai.circuit.state").gauge().value()).isEqualTo(1.0);
+        assertThat(registry.get("smartquiz.ai.calls.in.flight").gauge().value()).isZero();
+    }
+
+    @Test
+    @DisplayName("busy rejections are counted separately")
+    void busyMetric() throws Exception {
+        AiCallGuard g = guard(0, Duration.ofSeconds(5), 10);
+        io.micrometer.core.instrument.simple.SimpleMeterRegistry registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        g.bindTo(registry);
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CompletableFuture<Object> running = CompletableFuture.supplyAsync(() -> g.execute(() -> {
+            started.countDown();
+            await(release);
+            return null;
+        }));
+        assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+        assertThat(registry.get("smartquiz.ai.calls.in.flight").gauge().value()).isEqualTo(1.0);
+        assertThatThrownBy(() -> g.execute(() -> "never")).isInstanceOf(ServiceUnavailableException.class);
+        release.countDown();
+        running.get(5, TimeUnit.SECONDS);
+
+        assertThat(registry.get("smartquiz.ai.calls").tag("outcome", "busy").timer().count()).isEqualTo(1);
+    }
+
     private static String sleep(long ms) {
         try {
             Thread.sleep(ms);

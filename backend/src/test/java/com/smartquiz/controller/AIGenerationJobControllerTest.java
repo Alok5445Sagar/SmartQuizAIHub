@@ -59,6 +59,7 @@ class AIGenerationJobControllerTest extends BaseTest {
     @Autowired private JwtUtils jwtUtils;
     @Autowired private AiGenerationJobRepository jobRepository;
     @Autowired private AiGenerationJobService jobService;
+    @Autowired private io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
     private TechnologyStack stack;
     private Topic topic;
@@ -91,6 +92,7 @@ class AIGenerationJobControllerTest extends BaseTest {
     @DisplayName("POST returns 202 with a job; polling reaches SUCCEEDED with saved mixed MCQ/MSQ drafts")
     void mixedTypesJobSucceeds() throws Exception {
         String token = smeToken();
+        double succeededBefore = jobCount("succeeded");
 
         String body = mockMvc.perform(post("/api/ai/generate")
                         .header("Authorization", token)
@@ -115,6 +117,8 @@ class AIGenerationJobControllerTest extends BaseTest {
         assertThat(done.get("questions").get(4).get("questionType").asText()).isEqualTo("MSQ");
         assertThat(done.get("message").asText()).isEqualTo("5 question(s) generated and saved as Draft.");
         assertThat(done.get("finishedAt").isNull()).isFalse();
+        assertThat(jobCount("succeeded") - succeededBefore).isEqualTo(1.0);
+        assertThat(meterRegistry.get("smartquiz.ai.generation.jobs.duration").timer().count()).isPositive();
 
         long drafts = mcqRepository.findAll().stream()
                 .filter(m -> m.getTopic().getTopicId().equals(topic.getTopicId()))
@@ -165,11 +169,13 @@ class AIGenerationJobControllerTest extends BaseTest {
                 Mockito.anyString(), Mockito.anyList()))
             .thenThrow(new ServiceUnavailableException("Local AI service (Ollama) is unavailable."));
         String token = smeToken();
+        double failedBefore = jobCount("failed");
 
         JsonNode done = awaitTerminal(token, submit(token, request(2, true, false)));
 
         assertThat(done.get("status").asText()).isEqualTo("FAILED");
         assertThat(done.get("error").asText()).isEqualTo("Local AI service (Ollama) is unavailable.");
+        assertThat(jobCount("failed") - failedBefore).isEqualTo(1.0);
         assertThat(done.get("questions")).isEmpty();
     }
 
@@ -215,6 +221,7 @@ class AIGenerationJobControllerTest extends BaseTest {
         String running = smeToken();
         String queued = smeToken();
         String rejected = smeToken();
+        double rejectedBefore = jobCount("rejected");
         String runningJob = submit(running, request(1, true, false));
         awaitStatus(running, runningJob, "RUNNING");
         String queuedJob = submit(queued, request(1, true, false));
@@ -228,6 +235,8 @@ class AIGenerationJobControllerTest extends BaseTest {
                         .content(request(1, true, false)))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(header().exists("Retry-After"));
+        assertThat(jobCount("rejected") - rejectedBefore).isEqualTo(1.0);
+        assertThat(meterRegistry.get("smartquiz.ai.generation.jobs.queued").gauge().value()).isEqualTo(1.0);
 
         release.countDown();
         assertThat(awaitTerminal(running, runningJob).get("status").asText()).isEqualTo("SUCCEEDED");
@@ -274,6 +283,11 @@ class AIGenerationJobControllerTest extends BaseTest {
         assertThat(jobRepository.findById(queued.getJobId()).orElseThrow().getStatus()).isEqualTo(AiGenerationJob.Status.FAILED);
         assertThat(jobRepository.findById(recent.getJobId()).orElseThrow().getStatus()).isEqualTo(AiGenerationJob.Status.SUCCEEDED);
         assertThat(jobRepository.findById(old.getJobId())).isEmpty();
+    }
+
+    private double jobCount(String outcome) {
+        var counter = meterRegistry.find("smartquiz.ai.generation.jobs").tag("outcome", outcome).counter();
+        return counter == null ? 0.0 : counter.count();
     }
 
     private AiGenerationJob job(String owner, AiGenerationJob.Status status, LocalDateTime finishedAt) {
