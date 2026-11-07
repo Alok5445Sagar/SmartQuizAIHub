@@ -26,7 +26,7 @@ public class AuthControllerTest extends BaseTest {
         createAdmin("auth.admin");
                 User participant = new User();
                 participant.setEnterpriseId("auth.participant");
-                participant.setPassword("password123");
+                participant.setPassword("{noop}password123");
                 participant.setFullName("Auth Participant");
                 participant.setRole(User.Role.PARTICIPANT);
                 participant.setActive(true);

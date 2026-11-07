@@ -29,8 +29,27 @@ const renderLogin = (loginFn = jest.fn()) => {
 };
 
 describe('LoginPage', () => {
+  const originalDemoFlag = process.env.REACT_APP_SHOW_DEMO_ACCOUNTS;
+
   beforeEach(() => {
     mockNavigate.mockClear();
+    process.env.REACT_APP_SHOW_DEMO_ACCOUNTS = 'true';
+  });
+
+  afterAll(() => {
+    process.env.REACT_APP_SHOW_DEMO_ACCOUNTS = originalDemoFlag;
+  });
+
+  test('hides demo accounts unless REACT_APP_SHOW_DEMO_ACCOUNTS is true', () => {
+    process.env.REACT_APP_SHOW_DEMO_ACCOUNTS = 'false';
+    renderLogin();
+    expect(screen.queryByTestId('demo-accounts')).not.toBeInTheDocument();
+    expect(screen.queryByText(/👑 Admin/i)).not.toBeInTheDocument();
+  });
+
+  test('shows demo accounts when REACT_APP_SHOW_DEMO_ACCOUNTS is true', () => {
+    renderLogin();
+    expect(screen.getByTestId('demo-accounts')).toBeInTheDocument();
   });
 
   test('renders enterprise ID and password fields', () => {

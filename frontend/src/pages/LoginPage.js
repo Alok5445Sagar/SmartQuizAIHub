@@ -44,6 +44,7 @@ export default function LoginPage() {
 
   const fillDemo = (id, pw) => { setEnterpriseId(id); setPassword(pw); };
 
+
   return (
     <div className="login-page" style={styles.page}>
       <div className="login-left" style={styles.left}>
@@ -143,7 +144,9 @@ export default function LoginPage() {
             <span style={styles.trustHint}>Role-based routes for admin and SME workflows</span>
           </div>
 
-          <div style={styles.demoSection}>
+          {/* Demo shortcuts are dev-only (frontend/.env.development); inlined so production builds drop them. */}
+          {process.env.REACT_APP_SHOW_DEMO_ACCOUNTS === 'true' && (
+          <div style={styles.demoSection} data-testid="demo-accounts">
             <div style={styles.demoHeader}>
               <p style={styles.demoTitle}>{t('demoAccounts')}</p>
               {isMobile && (
@@ -181,6 +184,7 @@ export default function LoginPage() {
             )}
             <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>{t('clickToFillThenSignIn')}</p>
           </div>
+          )}
         </div>
       </div>
     </div>

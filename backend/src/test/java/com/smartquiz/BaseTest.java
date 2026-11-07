@@ -58,7 +58,7 @@ public abstract class BaseTest {
     protected User createSME(String enterpriseId, String fullName) {
         User u = new User();
         u.setEnterpriseId(enterpriseId);
-        u.setPassword("password123");
+        u.setPassword("{noop}password123");
         u.setFullName(fullName);
         u.setRole(User.Role.SME);
         u.setActive(true);
@@ -68,7 +68,7 @@ public abstract class BaseTest {
     protected User createAdmin(String enterpriseId) {
         User u = new User();
         u.setEnterpriseId(enterpriseId);
-        u.setPassword("admin123");
+        u.setPassword("{noop}admin123");
         u.setFullName("Admin User");
         u.setRole(User.Role.ADMIN);
         u.setActive(true);

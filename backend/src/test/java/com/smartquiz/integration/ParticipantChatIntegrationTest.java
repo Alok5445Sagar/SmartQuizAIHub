@@ -315,7 +315,7 @@ class ParticipantChatIntegrationTest extends BaseTest {
     private User createParticipant(String enterpriseId, String fullName) {
         User user = new User();
         user.setEnterpriseId(enterpriseId);
-        user.setPassword("password123");
+        user.setPassword("{noop}password123");
         user.setFullName(fullName);
         user.setRole(User.Role.PARTICIPANT);
         user.setActive(true);
