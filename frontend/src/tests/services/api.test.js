@@ -151,6 +151,19 @@ describe('aiAPI', () => {
     expect(api.post).toHaveBeenCalledWith('/api/ai/chat', payload);
   });
 
+  test('startGeneration posts to /api/ai/generate', async () => {
+    api.post = jest.fn().mockResolvedValue({ data: { jobId: 'j1', status: 'QUEUED' } });
+    const payload = { stackId: 1, topicId: 2, difficulty: 'Easy', numberOfQuestions: 3 };
+    await aiAPI.startGeneration(payload);
+    expect(api.post).toHaveBeenCalledWith('/api/ai/generate', payload);
+  });
+
+  test('getGenerationJob gets /api/ai/generate/{jobId} with the id encoded', async () => {
+    api.get = jest.fn().mockResolvedValue({ data: { status: 'RUNNING' } });
+    await aiAPI.getGenerationJob('a/b');
+    expect(api.get).toHaveBeenCalledWith('/api/ai/generate/a%2Fb');
+  });
+
   test('getChatHistory gets /api/ai/chat/history', async () => {
     api.get = jest.fn().mockResolvedValue({ data: { messages: [] } });
     await aiAPI.getChatHistory(25);

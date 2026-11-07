@@ -219,7 +219,9 @@ export const referenceAPI = {
 };
 
 export const aiAPI = {
-  generateQuestions: (data) => api.post('/api/ai/generate', data),
+  // Returns 202 with a job; poll getGenerationJob until status is SUCCEEDED or FAILED.
+  startGeneration: (data) => api.post('/api/ai/generate', data),
+  getGenerationJob: (jobId) => api.get(`/api/ai/generate/${encodeURIComponent(jobId)}`),
   checkSimilarity: (data) => api.post('/api/ai/similarity-check', data),
   chat: (data) => api.post('/api/ai/chat', data),
   getChatHistory: (limit = 40, sessionId = '') => {

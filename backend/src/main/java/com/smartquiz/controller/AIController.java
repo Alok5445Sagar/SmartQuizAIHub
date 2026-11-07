@@ -2,11 +2,8 @@ package com.smartquiz.controller;
 
 import com.smartquiz.exception.NotFoundException;
 import com.smartquiz.exception.UnauthorizedException;
-import com.smartquiz.exception.BusinessRuleException;
 
-import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -19,31 +16,29 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import com.smartquiz.ai.AIService;
 import com.smartquiz.dto.AIGenerationRequest;
+import com.smartquiz.dto.AiGenerationJobResponse;
 import com.smartquiz.dto.ChatHistoryResponse;
 import com.smartquiz.dto.ChatRequest;
 import com.smartquiz.dto.ChatResponse;
 import com.smartquiz.dto.ChatSessionsResponse;
 import com.smartquiz.dto.ChatStreamResponse;
-import com.smartquiz.dto.MCQDTO;
 import com.smartquiz.dto.SimilarityCheckRequest;
 import com.smartquiz.dto.SimilarityCheckResponse;
-import com.smartquiz.entity.TechnologyStack;
-import com.smartquiz.entity.Topic;
 import com.smartquiz.entity.User;
-import com.smartquiz.repository.TechnologyStackRepository;
-import com.smartquiz.repository.TopicRepository;
 import com.smartquiz.repository.UserRepository;
 import com.smartquiz.service.ChatMemoryService;
-import com.smartquiz.service.MCQService;
+import com.smartquiz.service.AiGenerationJobService;
 
 import jakarta.validation.Valid;
 
@@ -56,9 +51,7 @@ public class AIController {
     @Autowired
     @org.springframework.context.annotation.Lazy
     private AIService aiService;
-    @Autowired private MCQService mcqService;
-    @Autowired private TechnologyStackRepository stackRepository;
-    @Autowired private TopicRepository topicRepository;
+    @Autowired private AiGenerationJobService generationJobService;
     @Autowired private UserRepository userRepository;
         @Autowired private ChatMemoryService chatMemoryService;
         @Autowired @org.springframework.beans.factory.annotation.Qualifier("chatStreamExecutor")
@@ -66,88 +59,22 @@ public class AIController {
         @org.springframework.beans.factory.annotation.Value("${app.ai.stream-timeout:330s}")
         private java.time.Duration streamTimeout;
 
+    /** Queues a generation job; poll the Location URL until status is SUCCEEDED or FAILED. */
     @PostMapping("/generate")
-    public ResponseEntity<?> generateQuestions(
+    public ResponseEntity<AiGenerationJobResponse> generateQuestions(
             @jakarta.validation.Valid @RequestBody AIGenerationRequest req,
             Authentication auth) {
-
-        TechnologyStack stack = stackRepository.findById(req.getStackId())
-                .orElseThrow(() -> new NotFoundException("Stack not found"));
-        Topic topic = topicRepository.findById(req.getTopicId())
-                .orElseThrow(() -> new NotFoundException("Topic not found"));
-
-        if (req.getNumberOfQuestions() < 1 || req.getNumberOfQuestions() > 20) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("message", "Number of questions must be between 1 and 20"));
-        }
-
-        boolean generateMCQ = req.isGenerateMCQEnabled();
-        boolean generateMSQ = req.isGenerateMSQEnabled();
-        if (!generateMCQ && !generateMSQ) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("message", "Select at least one question type: MCQ and/or MSQ"));
-        }
-
-        List<String> selectedTypes = new ArrayList<>();
-        if (generateMCQ) selectedTypes.add("MCQ");
-        if (generateMSQ) selectedTypes.add("MSQ");
-
-        Map<String, Integer> typeCounts = splitCounts(req.getNumberOfQuestions(), selectedTypes);
-
-        List<MCQDTO.CreateRequest> generated = new ArrayList<>();
-        for (String questionType : selectedTypes) {
-            int count = typeCounts.getOrDefault(questionType, 0);
-            if (count <= 0) {
-                continue;
-            }
-            List<MCQDTO.CreateRequest> byType = aiService.generateQuestions(
-                    stack,
-                    topic,
-                    req.getDifficulty(),
-                    count,
-                    req.getStackId(),
-                    req.getTopicId(),
-                    questionType,
-                    generated);
-            generated.addAll(byType);
-        }
-
-        // Save all generated questions as DRAFT
-        List<MCQDTO.Response> saved = new ArrayList<>();
-        for (MCQDTO.CreateRequest createReq : generated) {
-            try {
-                createReq.setAiGenerated(true);  // ← add this line
-                MCQDTO.Response response = mcqService.createMCQ(auth.getName(), createReq);
-                saved.add(response);
-            } catch (RuntimeException e) {
-                // Skip duplicates that slipped through
-            }
-        }
-
-        return ResponseEntity.ok(Map.of(
-                "generated", saved.size(),
-                "requested", req.getNumberOfQuestions(),
-                                "requestedByType", typeCounts,
-                                "selectedTypes", selectedTypes,
-                "questions", saved,
-                "message", saved.size() + " question(s) generated and saved as Draft."
-        ));
+        AiGenerationJobResponse job = generationJobService.submit(auth.getName(), req);
+        return ResponseEntity.accepted()
+                .location(ServletUriComponentsBuilder.fromCurrentRequestUri()
+                        .path("/{jobId}").buildAndExpand(job.jobId()).toUri())
+                .body(job);
     }
 
-        private Map<String, Integer> splitCounts(int total, List<String> selectedTypes) {
-                if (selectedTypes == null || selectedTypes.isEmpty() || total <= 0) {
-                        return Collections.emptyMap();
-                }
-
-                int base = total / selectedTypes.size();
-                int remainder = total % selectedTypes.size();
-                Map<String, Integer> counts = new HashMap<>();
-                for (int i = 0; i < selectedTypes.size(); i++) {
-                        int current = base + (i < remainder ? 1 : 0);
-                        counts.put(selectedTypes.get(i), current);
-                }
-                return counts;
-        }
+    @GetMapping("/generate/{jobId}")
+    public AiGenerationJobResponse generationJob(@PathVariable String jobId, Authentication auth) {
+        return generationJobService.get(auth.getName(), jobId);
+    }
 
     @PostMapping("/similarity-check")
     public ResponseEntity<SimilarityCheckResponse> checkSimilarity(

@@ -4,6 +4,12 @@ import { aiAPI, referenceAPI } from '../services/api';
 import toast from 'react-hot-toast';
 import { useLanguage } from '../context/LanguageContext';
 
+// The running job id survives page changes and reloads in this tab, so polling resumes on return.
+export const GENERATION_JOB_KEY = 'smartquiz-ai-generation-job';
+export const GENERATION_POLL_MS = 2000;
+
+const isTerminal = (status) => status === 'SUCCEEDED' || status === 'FAILED';
+
 export default function AIGeneratePage({ onBack }) {
   const { t } = useLanguage();
   const [stacks, setStacks] = useState([]);
@@ -16,9 +22,12 @@ export default function AIGeneratePage({ onBack }) {
     generateMCQ: true,
     generateMSQ: false,
   });
-  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [jobId, setJobId] = useState(() => sessionStorage.getItem(GENERATION_JOB_KEY));
+  const [job, setJob] = useState(null);
   const [result, setResult] = useState(null);
   const navigate = useNavigate();
+  const loading = submitting || !!jobId;
 
   useEffect(() => {
     referenceAPI.getStacks().then(r => setStacks(r.data));
@@ -35,6 +44,52 @@ export default function AIGeneratePage({ onBack }) {
     }
   }, [form.stackId]);
 
+  useEffect(() => {
+    if (!jobId) return undefined;
+    let cancelled = false;
+    let timer = null;
+
+    const finish = () => {
+      sessionStorage.removeItem(GENERATION_JOB_KEY);
+      setJobId(null);
+      setJob(null);
+    };
+
+    const poll = async () => {
+      try {
+        const res = await aiAPI.getGenerationJob(jobId);
+        if (cancelled) return;
+        const data = res.data;
+        if (isTerminal(data.status)) {
+          finish();
+          if (data.status === 'SUCCEEDED') {
+            setResult(data);
+            toast.success(data.message);
+          } else {
+            toast.error(data.error || t('aiGenerationFailedTryAgain'));
+          }
+          return;
+        }
+        setJob(data);
+      } catch (err) {
+        if (cancelled) return;
+        if (err.response?.status === 404) {
+          // Job expired or belongs to someone else (e.g. a different login in this tab).
+          finish();
+          return;
+        }
+        // Network blip or server restart: keep polling; a restart marks the job FAILED.
+      }
+      timer = setTimeout(poll, GENERATION_POLL_MS);
+    };
+
+    poll();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [jobId, t]);
+
   const set = (field, value) => setForm(f => ({ ...f, [field]: value }));
 
   const handleGenerate = async () => {
@@ -46,10 +101,10 @@ export default function AIGeneratePage({ onBack }) {
     if (!form.generateMCQ && !form.generateMSQ) {
       return toast.error(t('selectAtLeastOneQuestionType'));
     }
-    setLoading(true);
+    setSubmitting(true);
     setResult(null);
     try {
-      const res = await aiAPI.generateQuestions({
+      const res = await aiAPI.startGeneration({
         stackId: parseInt(form.stackId),
         topicId: parseInt(form.topicId),
         difficulty: form.difficulty,
@@ -57,12 +112,13 @@ export default function AIGeneratePage({ onBack }) {
         generateMCQ: !!form.generateMCQ,
         generateMSQ: !!form.generateMSQ,
       });
-      setResult(res.data);
-      toast.success(res.data.message);
+      sessionStorage.setItem(GENERATION_JOB_KEY, res.data.jobId);
+      setJob(res.data);
+      setJobId(res.data.jobId);
     } catch (err) {
       toast.error((err.response?.data?.detail || err.response?.data?.message) || t('aiGenerationFailedTryAgain'));
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
@@ -164,9 +220,21 @@ export default function AIGeneratePage({ onBack }) {
             borderRadius: 12, textAlign: 'center'
           }}>
             <div style={{ fontSize: 32, marginBottom: 8 }}>🤖</div>
-            <p style={{ fontWeight: 600, color: 'var(--accent)' }}>{t('aiGeneratingYourQuestions')}</p>
+            <p style={{ fontWeight: 600, color: 'var(--accent)' }}>
+              {job?.status === 'QUEUED' && job.queuePosition
+                ? `${t('aiGenerationQueuePosition')} ${job.queuePosition}`
+                : t('aiGeneratingYourQuestions')}
+            </p>
+            {job?.status === 'RUNNING' && job.requested > 0 && (
+              <p data-testid="ai-generation-progress" style={{ fontSize: 13, marginTop: 4 }}>
+                {t('aiGenerationProgress')}: {job.generatedSoFar} / {job.requested}
+              </p>
+            )}
             <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
               {t('aiSimilarityScreeningNote')}
+            </p>
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
+              {t('aiGenerationContinuesInBackground')}
             </p>
           </div>
         )}

@@ -20,6 +20,9 @@ const readStoredUserPreferredLanguage = () => {
 const translations = {
   en: {
     chatResponseInterrupted: 'Response interrupted',
+    aiGenerationQueuePosition: 'Waiting for the AI model. Your place in the queue:',
+    aiGenerationProgress: 'Questions generated so far',
+    aiGenerationContinuesInBackground: 'You can leave this page. Generation continues in the background and the result appears here when you come back.',
     language: 'Language',
     addQuestion: 'Add Question',
     generateWithAI: 'Generate with AI',
@@ -553,6 +556,9 @@ const translations = {
   },
   es: {
     chatResponseInterrupted: 'Respuesta interrumpida',
+    aiGenerationQueuePosition: 'Esperando al modelo de IA. Tu posicion en la cola:',
+    aiGenerationProgress: 'Preguntas generadas hasta ahora',
+    aiGenerationContinuesInBackground: 'Puedes salir de esta pagina. La generacion continua en segundo plano y el resultado aparecera aqui cuando vuelvas.',
     language: 'Idioma',
     addQuestion: 'Agregar pregunta',
     generateWithAI: 'Generar con IA',
@@ -898,6 +904,9 @@ const translations = {
   },
   fr: {
     chatResponseInterrupted: 'Reponse interrompue',
+    aiGenerationQueuePosition: 'En attente du modele IA. Votre position dans la file :',
+    aiGenerationProgress: 'Questions generees pour le moment',
+    aiGenerationContinuesInBackground: 'Vous pouvez quitter cette page. La generation continue en arriere-plan et le resultat apparaitra ici a votre retour.',
     language: 'Langue',
     addQuestion: 'Ajouter une question',
     generateWithAI: 'Generer avec IA',
@@ -1172,6 +1181,9 @@ const translations = {
   },
   ro: {
     chatResponseInterrupted: 'Raspuns intrerupt',
+    aiGenerationQueuePosition: 'Se asteapta modelul AI. Pozitia ta in coada:',
+    aiGenerationProgress: 'Intrebari generate pana acum',
+    aiGenerationContinuesInBackground: 'Poti parasi aceasta pagina. Generarea continua in fundal, iar rezultatul apare aici cand revii.',
     language: 'Limba',
     addQuestion: 'Adauga intrebare',
     generateWithAI: 'Genereaza cu AI',
