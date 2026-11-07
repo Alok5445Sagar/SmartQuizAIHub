@@ -1,0 +1,13 @@
+title = "Smart Quiz AI Hub gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test-only fixtures and placeholders"
+paths = [
+  '''backend/src/test/''',
+  '''frontend/src/tests/''',
+  '''\.env\.example$''',
+  '''package-lock\.json$''',
+]
