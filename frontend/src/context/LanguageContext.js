@@ -20,6 +20,7 @@ const readStoredUserPreferredLanguage = () => {
 const translations = {
   en: {
     chatResponseInterrupted: 'Response interrupted',
+    failedToStartAttempt: 'Could not start the quiz. Please try again.',
     aiGenerationQueuePosition: 'Waiting for the AI model. Your place in the queue:',
     aiGenerationProgress: 'Questions generated so far',
     aiGenerationContinuesInBackground: 'You can leave this page. Generation continues in the background and the result appears here when you come back.',
@@ -556,6 +557,7 @@ const translations = {
   },
   es: {
     chatResponseInterrupted: 'Respuesta interrumpida',
+    failedToStartAttempt: 'No se pudo iniciar el cuestionario. Intentalo de nuevo.',
     aiGenerationQueuePosition: 'Esperando al modelo de IA. Tu posicion en la cola:',
     aiGenerationProgress: 'Preguntas generadas hasta ahora',
     aiGenerationContinuesInBackground: 'Puedes salir de esta pagina. La generacion continua en segundo plano y el resultado aparecera aqui cuando vuelvas.',
@@ -904,6 +906,7 @@ const translations = {
   },
   fr: {
     chatResponseInterrupted: 'Reponse interrompue',
+    failedToStartAttempt: 'Impossible de demarrer le quiz. Veuillez reessayer.',
     aiGenerationQueuePosition: 'En attente du modele IA. Votre position dans la file :',
     aiGenerationProgress: 'Questions generees pour le moment',
     aiGenerationContinuesInBackground: 'Vous pouvez quitter cette page. La generation continue en arriere-plan et le resultat apparaitra ici a votre retour.',
@@ -1181,6 +1184,7 @@ const translations = {
   },
   ro: {
     chatResponseInterrupted: 'Raspuns intrerupt',
+    failedToStartAttempt: 'Testul nu a putut porni. Incearca din nou.',
     aiGenerationQueuePosition: 'Se asteapta modelul AI. Pozitia ta in coada:',
     aiGenerationProgress: 'Intrebari generate pana acum',
     aiGenerationContinuesInBackground: 'Poti parasi aceasta pagina. Generarea continua in fundal, iar rezultatul apare aici cand revii.',

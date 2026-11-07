@@ -374,13 +374,34 @@ public class QuizDTO {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class SubmitAttemptRequest {
-        @Size(max = 200, message = "Participant name cannot exceed 200 characters")
-        private String participantName;
-        private String participantEnterpriseId;
+        /** From POST /start. Identity and timing come from the server-side session, not this body. */
+        @Size(max = 36)
+        private String attemptToken;
         @Size(max = 200)
         private List<AnswerRequest> answers;
-        private Integer elapsedSeconds;
         private Boolean autoSubmitted;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class AttemptStartRequest {
+        /** Guests only; employees are identified by their JWT. */
+        @Size(max = 200, message = "Participant name cannot exceed 200 characters")
+        private String participantName;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class AttemptStartResponse {
+        private String attemptToken;
+        private String participantName;
+        private int durationSeconds;
+        private int elapsedSeconds;
+        private int remainingSeconds;
+        /** True when this participant had already started; the clock keeps running from the first start. */
+        private boolean resumed;
     }
 
     @Data

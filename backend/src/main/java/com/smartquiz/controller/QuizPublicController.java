@@ -101,6 +101,16 @@ public class QuizPublicController {
         return ResponseEntity.ok(quizService.getParticipantPortalDashboard(self, participantName, languageCode));
     }
 
+    /** Starts or resumes the caller's attempt; the returned token is required to submit. */
+    @PostMapping("/{quizCode}/start")
+    public ResponseEntity<QuizDTO.AttemptStartResponse> startAttempt(
+            @PathVariable String quizCode,
+            @jakarta.validation.Valid @RequestBody(required = false) QuizDTO.AttemptStartRequest request,
+            Authentication authentication) {
+        String participantName = request == null ? null : request.getParticipantName();
+        return ResponseEntity.ok(quizService.startAttempt(quizCode, participantName, principal(authentication)));
+    }
+
     @PostMapping("/{quizCode}/attempt")
     public ResponseEntity<QuizDTO.AttemptResultResponse> submitAttempt(
             @PathVariable String quizCode,

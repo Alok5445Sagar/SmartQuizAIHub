@@ -5,12 +5,14 @@ import com.smartquiz.dto.QuizDTO;
 import com.smartquiz.entity.MCQ;
 import com.smartquiz.entity.Quiz;
 import com.smartquiz.entity.QuizAttempt;
+import com.smartquiz.entity.QuizAttemptSession;
 import com.smartquiz.entity.QuizQuestion;
 import com.smartquiz.entity.TechnologyStack;
 import com.smartquiz.entity.Topic;
 import com.smartquiz.entity.User;
 import com.smartquiz.repository.MCQRepository;
 import com.smartquiz.repository.QuizAttemptRepository;
+import com.smartquiz.repository.QuizAttemptSessionRepository;
 import com.smartquiz.repository.QuizQuestionRepository;
 import com.smartquiz.repository.QuizRepository;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -39,6 +41,7 @@ public class QuizServiceTest extends BaseTest {
     @Autowired private QuizRepository quizRepository;
     @Autowired private QuizQuestionRepository quizQuestionRepository;
     @Autowired private QuizAttemptRepository quizAttemptRepository;
+    @Autowired private QuizAttemptSessionRepository quizAttemptSessionRepository;
 
     @Test
     @DisplayName("Auto-pick prefers unused questions when enough are available")
@@ -187,15 +190,14 @@ public class QuizServiceTest extends BaseTest {
         MCQ q2 = createApprovedQuestion(admin, stack, topic, MCQ.QuestionType.MCQ, MCQ.Difficulty.Medium);
         Quiz quiz = createPublishedQuiz(admin, stack, topic, List.of(q1, q2));
 
+        String attemptToken = quizService.startAttempt(quiz.getQuizCode(), "Guest User", null).getAttemptToken();
         QuizDTO.SubmitAttemptRequest request = new QuizDTO.SubmitAttemptRequest(
-            "Guest User",
-            null,
+            attemptToken,
             List.of(new QuizDTO.AnswerRequest(q1.getQuestionId(), List.of("A"))),
-            null,
             false
         );
 
-        assertThatThrownBy(() -> quizService.submitAttempt(quiz.getQuizCode(), request))
+        assertThatThrownBy(() -> quizService.submitAttempt(quiz.getQuizCode(), request, null))
             .isInstanceOf(RuntimeException.class)
             .hasMessage("All quiz questions must be attempted before submission");
         }
@@ -211,18 +213,17 @@ public class QuizServiceTest extends BaseTest {
         MCQ q2 = createApprovedQuestion(admin, stack, topic, MCQ.QuestionType.MSQ, MCQ.Difficulty.Hard);
         Quiz quiz = createPublishedQuiz(admin, stack, topic, List.of(q1, q2));
 
+        String attemptToken = quizService.startAttempt(quiz.getQuizCode(), "Guest User Two", null).getAttemptToken();
         QuizDTO.SubmitAttemptRequest request = new QuizDTO.SubmitAttemptRequest(
-            "Guest User Two",
-            null,
+            attemptToken,
             List.of(
                 new QuizDTO.AnswerRequest(q1.getQuestionId(), List.of("A")),
                 new QuizDTO.AnswerRequest(q2.getQuestionId(), List.of())
             ),
-            null,
             false
         );
 
-        assertThatThrownBy(() -> quizService.submitAttempt(quiz.getQuizCode(), request))
+        assertThatThrownBy(() -> quizService.submitAttempt(quiz.getQuizCode(), request, null))
             .isInstanceOf(RuntimeException.class)
             .hasMessage("All quiz questions must be attempted before submission");
         }
@@ -346,15 +347,17 @@ public class QuizServiceTest extends BaseTest {
         quiz.setDurationMinutes(10);
         quizRepository.save(quiz);
 
+        String attemptToken = quizService.startAttempt(quiz.getQuizCode(), "Timed Guest", null).getAttemptToken();
+        QuizAttemptSession session = quizAttemptSessionRepository.findById(attemptToken).orElseThrow();
+        session.setStartedAt(session.getStartedAt().minusSeconds(600));
+        quizAttemptSessionRepository.saveAndFlush(session);
         QuizDTO.SubmitAttemptRequest request = new QuizDTO.SubmitAttemptRequest(
-                "Timed Guest",
-                null,
+                attemptToken,
                 List.of(new QuizDTO.AnswerRequest(q1.getQuestionId(), List.of("A"))),
-                600,
                 true
         );
 
-        QuizDTO.AttemptResultResponse response = quizService.submitAttempt(quiz.getQuizCode(), request);
+        QuizDTO.AttemptResultResponse response = quizService.submitAttempt(quiz.getQuizCode(), request, null);
 
         assertThat(response.isAutoSubmitted()).isTrue();
         assertThat(response.getTimeTakenSeconds()).isEqualTo(600);

@@ -205,6 +205,12 @@ export const quizPublicAPI = {
     });
     return res.data;
   },
+  // Starts or resumes an attempt; the server records the start time and returns the token needed to submit.
+  startAttempt: (quizCode, { participantName = '', participantAuthToken = '' } = {}) => publicApi.post(
+    `/api/public/quiz/${quizCode}/start`,
+    participantAuthToken ? {} : { participantName },
+    { headers: bearer(participantAuthToken) }
+  ),
   submitAttempt: (quizCode, data) => {
     const { participantAuthToken, ...body } = data || {};
     return publicApi.post(`/api/public/quiz/${quizCode}/attempt`, body, { headers: bearer(participantAuthToken) });

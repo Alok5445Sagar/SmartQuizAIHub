@@ -304,6 +304,18 @@ describe('quizPublicAPI credentials', () => {
     expect(config.headers.Authorization).toBe('Bearer tok');
   });
 
+  test('guest start sends the name and no Authorization header', async () => {
+    api.post = jest.fn().mockResolvedValue({ data: {} });
+    await quizPublicAPI.startAttempt('Q1', { participantName: 'Asha' });
+    expect(api.post).toHaveBeenCalledWith('/api/public/quiz/Q1/start', { participantName: 'Asha' }, { headers: {} });
+  });
+
+  test('employee start sends only the bearer token', async () => {
+    api.post = jest.fn().mockResolvedValue({ data: {} });
+    await quizPublicAPI.startAttempt('Q1', { participantName: 'ignored', participantAuthToken: 'tok' });
+    expect(api.post).toHaveBeenCalledWith('/api/public/quiz/Q1/start', {}, { headers: { Authorization: 'Bearer tok' } });
+  });
+
   test('guest attempts send no Authorization header', async () => {
     api.post = jest.fn().mockResolvedValue({ data: {} });
     await quizPublicAPI.submitAttempt('Q1', { participantName: 'Guest', participantAuthToken: null, answers: [] });

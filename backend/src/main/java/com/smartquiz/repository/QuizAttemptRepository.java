@@ -10,15 +10,7 @@ import java.util.List;
 
 public interface QuizAttemptRepository extends JpaRepository<QuizAttempt, Long> {
 
-    boolean existsByQuizAndParticipantEnterpriseId(Quiz quiz, String participantEnterpriseId);
-
-    @Query("""
-        SELECT COUNT(a) > 0 FROM QuizAttempt a
-        WHERE a.quiz = :quiz
-        AND a.participantEnterpriseId IS NULL
-        AND LOWER(a.participantName) = LOWER(:participantName)
-    """)
-    boolean existsGuestByQuizAndParticipantName(@Param("quiz") Quiz quiz, @Param("participantName") String participantName);
+    boolean existsByQuizAndParticipantKey(Quiz quiz, String participantKey);
 
     @Query("""
         SELECT a FROM QuizAttempt a

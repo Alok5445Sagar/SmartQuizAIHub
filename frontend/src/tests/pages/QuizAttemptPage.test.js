@@ -17,6 +17,7 @@ jest.mock('../../services/api', () => ({
     getQuiz: jest.fn(),
     getLeaderboard: jest.fn(),
     participantLogin: jest.fn(),
+    startAttempt: jest.fn(),
     submitAttempt: jest.fn(),
   },
 }));
@@ -73,6 +74,9 @@ describe('QuizAttemptPage new live quiz flow', () => {
     window.alert = jest.fn();
 
     quizPublicAPI.getQuiz.mockResolvedValue({ data: activeQuizPayload });
+    quizPublicAPI.startAttempt.mockResolvedValue({
+      data: { attemptToken: 'tok-1', participantName: 'Guest User', durationSeconds: 900, elapsedSeconds: 0, remainingSeconds: 900, resumed: false },
+    });
     quizPublicAPI.getLeaderboard.mockResolvedValue({
       data: {
         quizCode: 'QUIZ123',
@@ -336,7 +340,7 @@ describe('QuizAttemptPage new live quiz flow', () => {
 
     expect(quizPublicAPI.submitAttempt.mock.calls[0][1]).toMatchObject({
       autoSubmitted: true,
-      participantName: 'Guest User',
+      attemptToken: 'tok-1',
     });
 
     jest.useRealTimers();
@@ -364,5 +368,77 @@ describe('QuizAttemptPage new live quiz flow', () => {
     fireEvent.click(screen.getByRole('button', { name: /go to home/i }));
     expect(mockNavigate).toHaveBeenCalledWith('/participant');
     expect(screen.queryByText('Choose Login Method')).not.toBeInTheDocument();
+  });
+
+  const enterAsGuest = async (name = 'Guest User') => {
+    await waitFor(() => {
+      expect(screen.getByText('Choose Login Method')).toBeInTheDocument();
+    });
+    fireEvent.change(screen.getByPlaceholderText('Enter your full name'), { target: { value: name } });
+    fireEvent.click(screen.getByRole('button', { name: /continue to questions/i }));
+    await waitFor(() => {
+      expect(screen.getByText('Attempt Questions')).toBeInTheDocument();
+    });
+  };
+
+  test('starts the attempt on the server and submits with its token instead of a client-measured time', async () => {
+    quizPublicAPI.submitAttempt.mockResolvedValue({ data: { participantName: 'Guest User', score: 2, totalQuestions: 2 } });
+    window.confirm.mockReturnValue(true);
+
+    render(<QuizAttemptPage />);
+    await enterAsGuest();
+
+    await waitFor(() => {
+      expect(quizPublicAPI.startAttempt).toHaveBeenCalledWith('QUIZ123', { participantName: 'Guest User', participantAuthToken: '' });
+    });
+    fireEvent.click(screen.getAllByLabelText('A. Option A')[0]);
+    fireEvent.click(screen.getAllByLabelText('A. Option A')[1]);
+    fireEvent.click(screen.getByRole('button', { name: /submit quiz/i }));
+
+    await waitFor(() => expect(quizPublicAPI.submitAttempt).toHaveBeenCalledTimes(1));
+    const payload = quizPublicAPI.submitAttempt.mock.calls[0][1];
+    expect(payload.attemptToken).toBe('tok-1');
+    expect(payload).not.toHaveProperty('elapsedSeconds');
+    expect(payload).not.toHaveProperty('participantName');
+    expect(quizPublicAPI.startAttempt).toHaveBeenCalledTimes(1);
+  });
+
+  test('a resumed attempt keeps the server clock: the timer continues from the elapsed time', async () => {
+    jest.useFakeTimers();
+    quizPublicAPI.getQuiz.mockResolvedValueOnce({ data: { ...activeQuizPayload, durationMinutes: 1 } });
+    quizPublicAPI.startAttempt.mockResolvedValueOnce({
+      data: { attemptToken: 'tok-resume', durationSeconds: 60, elapsedSeconds: 50, remainingSeconds: 10, resumed: true },
+    });
+    quizPublicAPI.submitAttempt.mockResolvedValueOnce({ data: { participantName: 'Guest User', score: 0, totalQuestions: 2, autoSubmitted: true } });
+
+    render(<QuizAttemptPage />);
+    await enterAsGuest();
+
+    await waitFor(() => expect(screen.getByText(/Time Left: 0:1\d/)).toBeInTheDocument());
+    await act(async () => {
+      jest.advanceTimersByTime(11000);
+    });
+
+    await waitFor(() => expect(quizPublicAPI.submitAttempt).toHaveBeenCalledTimes(1));
+    expect(quizPublicAPI.submitAttempt.mock.calls[0][1]).toMatchObject({ attemptToken: 'tok-resume', autoSubmitted: true });
+    jest.useRealTimers();
+  });
+
+  test('when the server refuses to start (already attempted) the page returns to the login step', async () => {
+    const toast = require('react-hot-toast').default;
+    quizPublicAPI.startAttempt.mockRejectedValueOnce({
+      response: { status: 409, data: { message: 'A participant with this name has already attempted this quiz' } },
+    });
+
+    render(<QuizAttemptPage />);
+    await waitFor(() => expect(screen.getByText('Choose Login Method')).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText('Enter your full name'), { target: { value: 'Repeat Guest' } });
+    fireEvent.click(screen.getByRole('button', { name: /continue to questions/i }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('A participant with this name has already attempted this quiz');
+      expect(screen.getByText('Choose Login Method')).toBeInTheDocument();
+    });
+    expect(quizPublicAPI.submitAttempt).not.toHaveBeenCalled();
   });
 });

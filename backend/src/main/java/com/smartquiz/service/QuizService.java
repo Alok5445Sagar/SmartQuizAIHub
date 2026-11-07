@@ -6,6 +6,7 @@ import com.smartquiz.exception.NotFoundException;
 import com.smartquiz.exception.ConflictException;
 import com.smartquiz.exception.BusinessRuleException;
 import com.smartquiz.exception.UnauthorizedException;
+import com.smartquiz.exception.ForbiddenException;
 
 import com.smartquiz.dto.QuizDTO;
 import com.smartquiz.entity.*;
@@ -22,6 +23,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.stereotype.Service;
@@ -52,6 +54,7 @@ public class QuizService {
     @Autowired private QuizQuestionRepository quizQuestionRepository;
     @Autowired private QuizAttemptRepository quizAttemptRepository;
     @Autowired private QuizAttemptAnswerRepository quizAttemptAnswerRepository;
+    @Autowired private QuizAttemptSessionRepository quizAttemptSessionRepository;
     @Autowired private MCQRepository mcqRepository;
     @Autowired private MCQTranslationRepository mcqTranslationRepository;
     @Autowired private TopicRepository topicRepository;
@@ -487,9 +490,11 @@ public class QuizService {
 
         if (canAttempt) {
             if (normalizedEnterpriseId != null && !normalizedEnterpriseId.isBlank()) {
-                alreadyAttempted = quizAttemptRepository.existsByQuizAndParticipantEnterpriseId(quiz, normalizedEnterpriseId);
+                alreadyAttempted = quizAttemptRepository.existsByQuizAndParticipantKey(
+                        quiz, QuizAttempt.participantKey(normalizedEnterpriseId, null));
             } else if (normalizedName != null) {
-                alreadyAttempted = quizAttemptRepository.existsGuestByQuizAndParticipantName(quiz, normalizedName);
+                alreadyAttempted = quizAttemptRepository.existsByQuizAndParticipantKey(
+                        quiz, QuizAttempt.participantKey(null, normalizedName));
             }
 
             if (alreadyAttempted) {
@@ -779,14 +784,73 @@ public class QuizService {
         }
     }
 
-    @Transactional
-    public QuizDTO.AttemptResultResponse submitAttempt(String quizCode, QuizDTO.SubmitAttemptRequest request) {
-        return submitAttempt(quizCode, request, null);
+    /**
+     * Starts (or resumes) an attempt and records the start time on the server. Employees are identified by
+     * {@code authenticatedEnterpriseId} from the JWT; guests by name. Not transactional on purpose: when two
+     * starts race, the unique (quiz, participant) key rejects one insert and that call returns the winner.
+     */
+    public QuizDTO.AttemptStartResponse startAttempt(String quizCode, String participantName, String authenticatedEnterpriseId) {
+        Quiz quiz = getQuizByCodeOrThrow(quizCode);
+        if (quiz.getStatus() != Quiz.Status.PUBLISHED) {
+            throw new BusinessRuleException("This quiz is closed and cannot accept new attempts");
+        }
+
+        String enterpriseId = null;
+        String name;
+        if (authenticatedEnterpriseId != null) {
+            User user = userRepository.findByEnterpriseId(authenticatedEnterpriseId)
+                    .orElseThrow(() -> new NotFoundException("Employee not found"));
+            enterpriseId = user.getEnterpriseId();
+            name = user.getFullName();
+        } else {
+            name = normalizeName(participantName);
+            if (name == null) {
+                throw new BusinessRuleException("Participant name is required");
+            }
+        }
+
+        String key = QuizAttempt.participantKey(enterpriseId, name);
+        if (quizAttemptRepository.existsByQuizAndParticipantKey(quiz, key)) {
+            throw new ConflictException(alreadyAttemptedMessage(enterpriseId));
+        }
+
+        QuizAttemptSession session = quizAttemptSessionRepository.findByQuizAndParticipantKey(quiz, key).orElse(null);
+        boolean resumed = session != null;
+        if (session == null) {
+            QuizAttemptSession created = new QuizAttemptSession();
+            created.setAttemptToken(UUID.randomUUID().toString());
+            created.setQuiz(quiz);
+            created.setParticipantKey(key);
+            created.setParticipantName(name);
+            created.setParticipantEnterpriseId(enterpriseId);
+            created.setStartedAt(LocalDateTime.now());
+            try {
+                session = quizAttemptSessionRepository.saveAndFlush(created);
+            } catch (DataIntegrityViolationException concurrentStart) {
+                session = quizAttemptSessionRepository.findByQuizAndParticipantKey(quiz, key)
+                        .orElseThrow(() -> concurrentStart);
+                resumed = true;
+            }
+        }
+        if (session.getSubmittedAt() != null) {
+            throw new ConflictException(alreadyAttemptedMessage(enterpriseId));
+        }
+
+        int durationSeconds = quizDurationSeconds(quiz);
+        int elapsed = (int) Math.min(durationSeconds, secondsSince(session.getStartedAt()));
+        return new QuizDTO.AttemptStartResponse(
+                session.getAttemptToken(),
+                session.getParticipantName(),
+                durationSeconds,
+                elapsed,
+                durationSeconds - elapsed,
+                resumed);
     }
 
     /**
-     * Submits an attempt. {@code authenticatedEnterpriseId} comes from the caller's JWT: when present the attempt
-     * is recorded for that employee; when absent it is a guest attempt keyed by name.
+     * Submits a started attempt. Who submitted and how long it took come from the attempt session; the
+     * caller's JWT must match an employee session. A late submission is capped at the quiz duration and
+     * treated as auto-submitted (partial answers allowed).
      */
     @Transactional
     public QuizDTO.AttemptResultResponse submitAttempt(String quizCode, QuizDTO.SubmitAttemptRequest request,
@@ -797,38 +861,28 @@ public class QuizService {
             throw new BusinessRuleException("This quiz is closed and cannot accept new attempts");
         }
 
-        String normalizedName = normalizeName(request.getParticipantName());
-        if (normalizedName == null) {
-            throw new BusinessRuleException("Participant name is required");
+        String attemptToken = request.getAttemptToken() == null ? "" : request.getAttemptToken().trim();
+        if (attemptToken.isEmpty()) {
+            throw new BusinessRuleException("Start the quiz before submitting answers");
         }
+        QuizAttemptSession session = quizAttemptSessionRepository.lockByToken(attemptToken)
+                .filter(s -> Objects.equals(s.getQuiz().getQuizId(), quiz.getQuizId()))
+                .orElseThrow(() -> new NotFoundException("Quiz attempt not found. Start the quiz again."));
 
-        String participantEnterpriseId = null;
-        String participantName = normalizedName;
-
-        String claimedEnterpriseId = request.getParticipantEnterpriseId() == null ? null : request.getParticipantEnterpriseId().trim();
-        if (authenticatedEnterpriseId == null && claimedEnterpriseId != null && !claimedEnterpriseId.isBlank()) {
-            throw new UnauthorizedException("Employee login is required to submit with enterprise ID");
-        }
-        if (authenticatedEnterpriseId != null && claimedEnterpriseId != null && !claimedEnterpriseId.isBlank()
-                && !claimedEnterpriseId.equals(authenticatedEnterpriseId)) {
-            throw new UnauthorizedException("Employee session does not match the selected enterprise ID");
-        }
-
-        if (authenticatedEnterpriseId != null) {
-            String enterpriseId = authenticatedEnterpriseId;
-
-            User user = userRepository.findByEnterpriseId(enterpriseId)
-                    .orElseThrow(() -> new NotFoundException("Employee not found"));
-            participantEnterpriseId = user.getEnterpriseId();
-            participantName = user.getFullName();
-
-            if (quizAttemptRepository.existsByQuizAndParticipantEnterpriseId(quiz, participantEnterpriseId)) {
-                throw new ConflictException("You have already attempted this quiz");
+        if (session.getParticipantEnterpriseId() != null) {
+            if (authenticatedEnterpriseId == null) {
+                throw new UnauthorizedException("Employee login is required to submit this attempt");
             }
-        } else {
-            if (quizAttemptRepository.existsGuestByQuizAndParticipantName(quiz, participantName)) {
-                throw new ConflictException("A participant with this name has already attempted this quiz");
+            if (!session.getParticipantEnterpriseId().equals(authenticatedEnterpriseId)) {
+                throw new ForbiddenException("This attempt belongs to another employee");
             }
+        } else if (authenticatedEnterpriseId != null) {
+            throw new ForbiddenException("This attempt was started as a guest");
+        }
+
+        if (session.getSubmittedAt() != null
+                || quizAttemptRepository.existsByQuizAndParticipantKey(quiz, session.getParticipantKey())) {
+            throw new ConflictException("This attempt has already been submitted");
         }
 
         List<QuizQuestion> quizQuestions = quizQuestionRepository.findByQuizOrderByQuestionOrderAsc(quiz);
@@ -841,12 +895,11 @@ public class QuizService {
                 .collect(Collectors.toMap(MCQ::getQuestionId, q -> q));
 
         List<QuizDTO.AnswerRequest> answers = request.getAnswers() == null ? Collections.emptyList() : request.getAnswers();
-        int maxDurationSeconds = Math.max(0, (quiz.getDurationMinutes() == null ? DEFAULT_QUIZ_DURATION_MINUTES : quiz.getDurationMinutes()) * 60);
-        int elapsedSeconds = request.getElapsedSeconds() == null ? 0 : Math.max(0, request.getElapsedSeconds());
-        if (maxDurationSeconds > 0 && elapsedSeconds > maxDurationSeconds) {
-            elapsedSeconds = maxDurationSeconds;
-        }
-        boolean autoSubmitted = Boolean.TRUE.equals(request.getAutoSubmitted()) || (maxDurationSeconds > 0 && elapsedSeconds >= maxDurationSeconds);
+        int maxDurationSeconds = quizDurationSeconds(quiz);
+        long elapsed = secondsSince(session.getStartedAt());
+        boolean overtime = elapsed >= maxDurationSeconds;
+        int elapsedSeconds = (int) Math.min(elapsed, maxDurationSeconds);
+        boolean autoSubmitted = Boolean.TRUE.equals(request.getAutoSubmitted()) || overtime;
 
         if (!autoSubmitted && answers.size() != quizQuestions.size()) {
             throw new BusinessRuleException("All quiz questions must be attempted before submission");
@@ -865,14 +918,20 @@ public class QuizService {
 
         QuizAttempt attempt = new QuizAttempt();
         attempt.setQuiz(quiz);
-        attempt.setParticipantName(participantName);
-        attempt.setParticipantEnterpriseId(participantEnterpriseId);
+        attempt.setParticipantName(session.getParticipantName());
+        attempt.setParticipantEnterpriseId(session.getParticipantEnterpriseId());
+        attempt.setParticipantKey(session.getParticipantKey());
         attempt.setTotalQuestions(quizQuestions.size());
         attempt.setCorrectCount(0);
         attempt.setScore(0);
         attempt.setTimeTakenSeconds(elapsedSeconds);
         attempt.setAutoSubmitted(autoSubmitted);
-        QuizAttempt savedAttempt = quizAttemptRepository.save(attempt);
+        QuizAttempt savedAttempt;
+        try {
+            savedAttempt = quizAttemptRepository.saveAndFlush(attempt);
+        } catch (DataIntegrityViolationException duplicate) {
+            throw new ConflictException("This attempt has already been submitted", duplicate);
+        }
 
         for (QuizDTO.AnswerRequest answer : answers) {
             MCQ question = questionMap.get(answer.getQuestionId());
@@ -910,6 +969,9 @@ public class QuizService {
         savedAttempt.setScore(correctCount);
         QuizAttempt updatedAttempt = quizAttemptRepository.save(savedAttempt);
 
+        session.setSubmittedAt(LocalDateTime.now());
+        quizAttemptSessionRepository.save(session);
+
         return new QuizDTO.AttemptResultResponse(
                 updatedAttempt.getAttemptId(),
                 updatedAttempt.getParticipantName(),
@@ -917,10 +979,25 @@ public class QuizService {
                 updatedAttempt.getScore(),
                 updatedAttempt.getTotalQuestions(),
                 updatedAttempt.getCorrectCount(),
-            updatedAttempt.getTimeTakenSeconds(),
-            updatedAttempt.isAutoSubmitted(),
+                updatedAttempt.getTimeTakenSeconds(),
+                updatedAttempt.isAutoSubmitted(),
                 updatedAttempt.getSubmittedAt()
         );
+    }
+
+    private static String alreadyAttemptedMessage(String enterpriseId) {
+        return enterpriseId != null
+                ? "You have already attempted this quiz"
+                : "A participant with this name has already attempted this quiz";
+    }
+
+    private static int quizDurationSeconds(Quiz quiz) {
+        int minutes = quiz.getDurationMinutes() == null ? DEFAULT_QUIZ_DURATION_MINUTES : quiz.getDurationMinutes();
+        return Math.max(1, minutes) * 60;
+    }
+
+    private static long secondsSince(LocalDateTime start) {
+        return Math.max(0, java.time.Duration.between(start, LocalDateTime.now()).getSeconds());
     }
 
     public QuizDTO.LeaderboardResponse getLeaderboard(String quizCode) {

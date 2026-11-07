@@ -63,7 +63,9 @@ export default function QuizAttemptPage() {
   const [attemptStep, setAttemptStep] = useState(1);
   const [questionTypeFilter, setQuestionTypeFilter] = useState('ALL');
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  // Set from the server's start response; the server is the source of truth for elapsed time.
   const [attemptStartedAtMs, setAttemptStartedAtMs] = useState(null);
+  const [attemptToken, setAttemptToken] = useState(null);
   const [timeLeftSeconds, setTimeLeftSeconds] = useState(null);
   const [lastThreeMinAlertShown, setLastThreeMinAlertShown] = useState(false);
   const [isMobile, setIsMobile] = useState(() => (typeof window !== 'undefined' ? window.innerWidth <= 768 : false));
@@ -184,10 +186,11 @@ export default function QuizAttemptPage() {
   const canSubmit = useMemo(() => {
     if (!quiz?.canAttempt) return false;
     if (!hasParticipantIdentity || !participantName) return false;
+    if (!attemptToken) return false;
     if (totalQuestions === 0) return false;
     if (answeredQuestions !== totalQuestions) return false;
     return true;
-  }, [quiz, hasParticipantIdentity, participantName, totalQuestions, answeredQuestions]);
+  }, [quiz, hasParticipantIdentity, participantName, attemptToken, totalQuestions, answeredQuestions]);
 
   const visibleQuestions = useMemo(() => {
     const all = quiz?.questions || [];
@@ -222,9 +225,6 @@ export default function QuizAttemptPage() {
       }
       if (saved?.answers && typeof saved.answers === 'object') {
         setAnswers(saved.answers);
-        if (typeof saved.startedAtMs === 'number' && saved.startedAtMs > 0) {
-          setAttemptStartedAtMs(saved.startedAtMs);
-        }
         toast(t('loadedSavedResponses'), { icon: '💾' });
       }
     } catch {
@@ -264,15 +264,9 @@ export default function QuizAttemptPage() {
       return;
     }
 
-    const elapsedSeconds = attemptStartedAtMs
-      ? Math.max(0, Math.floor((Date.now() - attemptStartedAtMs) / 1000))
-      : 0;
-
     const payload = {
-      participantName,
-      participantEnterpriseId: mode === 'employee' ? employeeProfile?.enterpriseId : null,
+      attemptToken,
       participantAuthToken: mode === 'employee' ? employeeProfile?.authToken : null,
-      elapsedSeconds,
       autoSubmitted: false,
       answers: (quiz?.questions || []).map((question) => ({
         questionId: question.questionId,
@@ -299,19 +293,13 @@ export default function QuizAttemptPage() {
   };
 
   const autoSubmitAttempt = async () => {
-    if (submitting || submittedResult || !quiz?.canAttempt || !hasParticipantIdentity) {
+    if (submitting || submittedResult || !quiz?.canAttempt || !hasParticipantIdentity || !attemptToken) {
       return;
     }
 
-    const elapsedSeconds = attemptStartedAtMs
-      ? Math.max(0, Math.floor((Date.now() - attemptStartedAtMs) / 1000))
-      : (resolvedDurationMinutes * 60);
-
     const payload = {
-      participantName,
-      participantEnterpriseId: mode === 'employee' ? employeeProfile?.enterpriseId : null,
+      attemptToken,
       participantAuthToken: mode === 'employee' ? employeeProfile?.authToken : null,
-      elapsedSeconds,
       autoSubmitted: true,
       answers: (quiz?.questions || []).map((question) => ({
         questionId: question.questionId,
@@ -346,7 +334,6 @@ export default function QuizAttemptPage() {
     localStorage.setItem(draftStorageKey, JSON.stringify({
       participantKey,
       answers,
-      startedAtMs: attemptStartedAtMs || Date.now(),
       savedAt: new Date().toISOString(),
     }));
     toast.success(t('responsesSaved'));
@@ -378,21 +365,39 @@ export default function QuizAttemptPage() {
       toast.error(t('enterYourName'));
       return;
     }
-    if (!attemptStartedAtMs) {
-      setAttemptStartedAtMs(Date.now());
-    }
     setAttemptStep(2);
   };
 
+  // Entering the questions step starts (or resumes) the attempt on the server. The timer counts from the
+  // server's start time, so reloading the page does not reset the clock.
   useEffect(() => {
     if (!quiz?.canAttempt || submittedResult || attemptStep !== 2 || !hasParticipantIdentity) {
-      return;
+      return undefined;
+    }
+    if (attemptToken) {
+      return undefined;
     }
 
-    if (!attemptStartedAtMs) {
-      setAttemptStartedAtMs(Date.now());
-    }
-  }, [quiz, submittedResult, attemptStep, hasParticipantIdentity, attemptStartedAtMs]);
+    // Starting is idempotent on the server, so a re-run before the response arrives is harmless.
+    let cancelled = false;
+    quizPublicAPI.startAttempt(quizCode, {
+      participantName: mode === 'employee' ? '' : guestName.trim(),
+      participantAuthToken: mode === 'employee' ? employeeProfile?.authToken : '',
+    })
+      .then((res) => {
+        if (cancelled) return;
+        setAttemptToken(res.data.attemptToken);
+        setAttemptStartedAtMs(Date.now() - (Number(res.data.elapsedSeconds) || 0) * 1000);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        toast.error((err.response?.data?.detail || err.response?.data?.message) || t('failedToStartAttempt'));
+        setAttemptStep(1);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [quiz, submittedResult, attemptStep, hasParticipantIdentity, attemptToken, quizCode, mode, guestName, employeeProfile]);
 
   useEffect(() => {
     if (!quiz?.canAttempt || submittedResult || attemptStep !== 2 || !hasParticipantIdentity || !attemptStartedAtMs) {
@@ -404,6 +409,7 @@ export default function QuizAttemptPage() {
       return;
     }
 
+    let intervalId = null;
     const tick = () => {
       const elapsed = Math.max(0, Math.floor((Date.now() - attemptStartedAtMs) / 1000));
       const left = Math.max(totalDurationSeconds - elapsed, 0);
@@ -420,8 +426,8 @@ export default function QuizAttemptPage() {
       }
     };
 
+    intervalId = setInterval(tick, 1000);
     tick();
-    const intervalId = setInterval(tick, 1000);
     return () => clearInterval(intervalId);
   }, [quiz, submittedResult, attemptStep, hasParticipantIdentity, attemptStartedAtMs, lastThreeMinAlertShown, resolvedDurationMinutes]);
 
