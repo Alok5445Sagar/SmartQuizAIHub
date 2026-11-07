@@ -8,9 +8,11 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -28,6 +30,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smartquiz.dto.MCQDTO;
 import com.smartquiz.dto.SimilarityCheckResponse;
+import com.smartquiz.exception.ServiceUnavailableException;
 import com.smartquiz.entity.MCQ;
 import com.smartquiz.entity.TechnologyStack;
 import com.smartquiz.entity.Topic;
@@ -62,8 +65,7 @@ class AIServiceOllamaTest {
         ReflectionTestUtils.setField(aiService, "generateRetryMultiplier", 1);
         ReflectionTestUtils.setField(aiService, "generateMinAttempts", 1);
         ReflectionTestUtils.setField(aiService, "maxOutputTokens", 1200);
-        ReflectionTestUtils.setField(aiService, "retryMaxAttempts", 1);
-        ReflectionTestUtils.setField(aiService, "retryInitialBackoffMs", 200L);
+        ReflectionTestUtils.setField(aiService, "aiCallGuard", testGuard());
         ReflectionTestUtils.setField(aiService, "maxRequestBytes", 30000);
         aiService.init();
 
@@ -74,6 +76,22 @@ class AIServiceOllamaTest {
         topic.setTopicId(2L);
         topic.setTopicName("Collections Framework");
         topic.setStack(stack);
+    }
+
+    private AiCallGuard guard;
+
+    private AiCallGuard testGuard() {
+        // Small window so a few failures open the breaker; no retry delay.
+        guard = new AiCallGuard(new AiCallGuard.Settings(1, 5, Duration.ofSeconds(5), Duration.ofSeconds(5),
+                1, Duration.ofMillis(1), 50f, 2, 4, Duration.ofSeconds(30)));
+        return guard;
+    }
+
+    @AfterEach
+    void shutdownGuard() {
+        if (guard != null) {
+            guard.shutdown();
+        }
     }
 
     private void modelReplies(String... contents) {
@@ -159,6 +177,64 @@ class AIServiceOllamaTest {
         assertThatThrownBy(() -> aiService.generateQuestions(
                 stack, topic, "Medium", 1, 1L, 2L, "MCQ", Collections.emptyList()))
                 .hasMessageContaining("Ollama");
+    }
+
+    @Test
+    @DisplayName("generation asks Ollama for schema-constrained JSON; chat does not")
+    void generation_usesJsonSchemaFormat() {
+        modelReplies("""
+                {"questions":[{"questionStem":"Which map keeps keys sorted?","optionA":"HashMap","optionB":"TreeMap",
+                  "optionC":"IdentityHashMap","optionD":"WeakHashMap","correctAnswer":"B"}]}
+                """, "Plain chat answer");
+
+        aiService.generateQuestions(stack, topic, "Medium", 1, 1L, 2L, "MCQ", Collections.emptyList());
+        aiService.answerGeneralQuery("Hi", List.of(), "sme", "SME");
+
+        ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+        Mockito.verify(chatModel, Mockito.times(2)).call(captor.capture());
+        Object generationFormat = ((OllamaOptions) captor.getAllValues().get(0).getOptions()).getFormat();
+        assertThat(generationFormat).isEqualTo(AIService.questionsSchema(false));
+        assertThat(((OllamaOptions) captor.getAllValues().get(1).getOptions()).getFormat()).isNull();
+    }
+
+    @Test
+    @DisplayName("malformed JSON falls back to the loose text parser")
+    void malformedJson_fallsBackToLooseParser() {
+        modelReplies("""
+                1. Which collection allows duplicate elements?
+                A) Set
+                B) List
+                C) SortedSet
+                D) EnumSet
+                Answer: B
+                """);
+
+        List<MCQDTO.CreateRequest> result = aiService.generateQuestions(
+                stack, topic, "Easy", 1, 1L, 2L, "MCQ", Collections.emptyList());
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getOptionB()).isEqualTo("List");
+        assertThat(result.get(0).getCorrectAnswer()).isEqualTo("B");
+    }
+
+    @Test
+    @DisplayName("once the breaker opens: chat serves the fallback, generation returns 503 without calling Ollama")
+    void openBreaker_fallbackAndFastFailure() {
+        when(chatModel.call(any(Prompt.class))).thenThrow(new RuntimeException("I/O error: Connection refused"));
+        for (int i = 0; i < 2; i++) {
+            assertThatThrownBy(() -> aiService.generateQuestions(
+                    stack, topic, "Medium", 1, 1L, 2L, "MCQ", Collections.emptyList()))
+                    .isInstanceOf(ServiceUnavailableException.class);
+        }
+        assertThat(guard.circuitState()).isEqualTo(io.github.resilience4j.circuitbreaker.CircuitBreaker.State.OPEN);
+        Mockito.clearInvocations(chatModel);
+
+        assertThat(aiService.answerGeneralQuery("Explain Java streams", List.of(), "sme", "SME")).contains("[Fallback mode]");
+        assertThatThrownBy(() -> aiService.generateQuestions(
+                stack, topic, "Medium", 1, 1L, 2L, "MCQ", Collections.emptyList()))
+                .isInstanceOfSatisfying(ServiceUnavailableException.class,
+                        ex -> assertThat(ex.getRetryAfterSeconds()).isEqualTo(30));
+        Mockito.verify(chatModel, Mockito.never()).call(any(Prompt.class));
     }
 
     @Test

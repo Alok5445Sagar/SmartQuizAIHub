@@ -806,6 +806,10 @@ public class MCQService {
     }
 
     private boolean isTransientAiFailure(RuntimeException ex) {
+        // Ollama down, busy, timed out or circuit open: fall back to the exact-duplicate check.
+        if (ex instanceof com.smartquiz.exception.ServiceUnavailableException) {
+            return true;
+        }
         String message = ex.getMessage();
         if (message == null || message.isBlank()) {
             return false;

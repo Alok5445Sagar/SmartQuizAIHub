@@ -76,17 +76,14 @@ public class AIService {
     @Value("${app.ai.max-output-tokens:1200}")
     private int maxOutputTokens;
 
-    @Value("${app.ai.retry.max-attempts:4}")
-    private int retryMaxAttempts;
-
-    @Value("${app.ai.retry.initial-backoff-ms:600}")
-    private long retryInitialBackoffMs;
-
     @Value("${app.ai.max-request-bytes:30000}")
     private int maxRequestBytes;
 
     @Autowired
     private MCQRepository mcqRepository;
+
+    @Autowired
+    private AiCallGuard aiCallGuard;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -141,7 +138,7 @@ public class AIService {
 
         String prompt = buildGenerationPrompt(
             stack.getStackName(), topic.getTopicName(), difficulty, count, requestAvoidStems, normalizedQuestionType);
-        String rawResponse = callModel(prompt);
+        String rawResponse = callModel(prompt, questionsSchema("MSQ".equals(normalizedQuestionType)));
 
         List<MCQDTO.CreateRequest> generated = parseGeneratedQuestions(
                 rawResponse, stack.getStackId(), topic.getTopicId(), difficulty, normalizedQuestionType);
@@ -185,7 +182,7 @@ public class AIService {
                 int retryRequestCount = Math.min(stillNeeded + Math.max(1, stillNeeded), 20);
                 String retryPrompt = buildGenerationPrompt(
                     stack.getStackName(), topic.getTopicName(), difficulty, retryRequestCount, retryAvoidStems, normalizedQuestionType);
-                String retryResponse = callModel(retryPrompt);
+                String retryResponse = callModel(retryPrompt, questionsSchema("MSQ".equals(normalizedQuestionType)));
                 List<MCQDTO.CreateRequest> retryGenerated = parseGeneratedQuestions(
                         retryResponse, stack.getStackId(), topic.getTopicId(), difficulty, normalizedQuestionType);
 
@@ -215,7 +212,7 @@ public class AIService {
             List<String> singleAvoidStems = buildRetryAvoidStems(existingStems, avoidCandidates, 120);
             String singlePrompt = buildGenerationPrompt(
                     stack.getStackName(), topic.getTopicName(), difficulty, 1, singleAvoidStems, normalizedQuestionType);
-            String singleResponse = callModel(singlePrompt);
+            String singleResponse = callModel(singlePrompt, questionsSchema("MSQ".equals(normalizedQuestionType)));
             List<MCQDTO.CreateRequest> singleGenerated = parseGeneratedQuestions(
                     singleResponse, stack.getStackId(), topic.getTopicId(), difficulty, normalizedQuestionType);
 
@@ -402,54 +399,56 @@ public class AIService {
 
     private static final String DEFAULT_SYSTEM_PROMPT = "You are a quiz assistant. Follow the user's response format exactly.";
 
-    /** Calls the model with the quiz-assistant system prompt (generation, similarity, translation). */
+    /** Calls the model with the quiz-assistant system prompt (translation and free-form prompts). */
     private String callModel(String prompt) {
-        return callAssistantChat(DEFAULT_SYSTEM_PROMPT, prompt, maxOutputTokens, 0.2d);
+        return callModel(prompt, null);
+    }
+
+    /**
+     * Calls the model; when {@code jsonSchema} is given, Ollama constrains the output to that schema
+     * (structured outputs), so the reply is valid JSON of the expected shape.
+     */
+    private String callModel(String prompt, Map<String, Object> jsonSchema) {
+        return callAssistantChat(DEFAULT_SYSTEM_PROMPT, prompt, maxOutputTokens, 0.2d, jsonSchema);
     }
 
     private String callAssistantChat(String systemPrompt, String userPrompt, int maxTokens, double temperature) {
+        return callAssistantChat(systemPrompt, userPrompt, maxTokens, temperature, null);
+    }
+
+    private String callAssistantChat(String systemPrompt, String userPrompt, int maxTokens, double temperature,
+                                     Map<String, Object> jsonSchema) {
         String boundedPrompt = enforceRequestSizeLimit(userPrompt);
-        int maxAttempts = Math.max(1, retryMaxAttempts);
-        long backoffMs = Math.max(200L, retryInitialBackoffMs);
+        OllamaOptions.Builder optionsBuilder = OllamaOptions.builder()
+                .model(model)
+                .temperature(temperature)
+                .topP(0.9)
+                .numPredict(maxTokens)
+                .numCtx(numCtx);
+        if (jsonSchema != null) {
+            optionsBuilder.format(jsonSchema);
+        }
+        OllamaOptions options = optionsBuilder.build();
 
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            try {
-                OllamaOptions options = OllamaOptions.builder()
-                        .model(model)
-                        .temperature(temperature)
-                        .topP(0.9)
-                        .numPredict(maxTokens)
-                        .numCtx(numCtx)
-                        .build();
-
+        try {
+            // Bulkhead, time limit, retry and circuit breaker live in the guard.
+            return aiCallGuard.execute(() -> {
                 String modelResponse = chatClient.prompt()
                         .system(systemPrompt)
                         .user(boundedPrompt)
                         .options(options)
                         .call()
                         .content();
-
                 if (modelResponse == null || modelResponse.isBlank()) {
-                    throw new BusinessRuleException("Ollama returned an empty response.");
+                    throw new IllegalStateException("Ollama returned an empty response.");
                 }
                 return modelResponse;
-            } catch (Exception e) {
-                RuntimeException mapped = mapOllamaError(e);
-                if (!isRetryableError(e) || attempt == maxAttempts) {
-                    throw mapped;
-                }
-                log.warn("Transient AI failure (attempt {}/{}). Retrying in {} ms. Cause: {}",
-                        attempt, maxAttempts, backoffMs, safeSnippet(e.getMessage()));
-                try {
-                    Thread.sleep(backoffMs);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    throw new IllegalStateException("AI retry interrupted while waiting for backoff.");
-                }
-                backoffMs = Math.min(backoffMs * 2L, 8000L);
-            }
+            });
+        } catch (com.smartquiz.exception.ApiException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw mapOllamaError(e);
         }
-        throw new IllegalStateException("AI service error: retry loop exhausted unexpectedly.");
     }
 
     private RuntimeException mapOllamaError(Exception e) {
@@ -469,16 +468,41 @@ public class AIService {
         return new ServiceUnavailableException("AI service error: " + safeSnippet(e.getMessage()));
     }
 
-    private boolean isRetryableError(Exception e) {
-        String msg = e.getMessage() == null ? "" : e.getMessage().toLowerCase();
-        // Retry only transient transport problems; a missing model or bad request will not fix itself.
-        return msg.contains("connection reset")
-                || msg.contains("503")
-                || msg.contains("502")
-                || msg.contains("500")
-                || msg.contains("empty response");
+    /** JSON schema for generated questions: {"questions":[{questionStem, optionA..F, correctAnswer}]}. */
+    static Map<String, Object> questionsSchema(boolean msq) {
+        Map<String, Object> str = Map.of("type", "string");
+        Map<String, Object> properties = new java.util.LinkedHashMap<>();
+        properties.put("questionStem", str);
+        properties.put("optionA", str);
+        properties.put("optionB", str);
+        properties.put("optionC", str);
+        properties.put("optionD", str);
+        if (msq) {
+            properties.put("optionE", str);
+            properties.put("optionF", str);
+        }
+        properties.put("correctAnswer", str);
+        Map<String, Object> question = Map.of(
+                "type", "object",
+                "properties", properties,
+                "required", List.of("questionStem", "optionA", "optionB", "optionC", "optionD", "correctAnswer"));
+        return Map.of(
+                "type", "object",
+                "properties", Map.of("questions", Map.of("type", "array", "items", question)),
+                "required", List.of("questions"));
     }
 
+    /** JSON schema for similarity verdicts: {"matches":[{id, similarity}]}. */
+    static Map<String, Object> similaritySchema() {
+        Map<String, Object> match = Map.of(
+                "type", "object",
+                "properties", Map.of("id", Map.of("type", "integer"), "similarity", Map.of("type", "integer")),
+                "required", List.of("id", "similarity"));
+        return Map.of(
+                "type", "object",
+                "properties", Map.of("matches", Map.of("type", "array", "items", match)),
+                "required", List.of("matches"));
+    }
     private String enforceRequestSizeLimit(String prompt) {
         if (prompt == null) {
             return "";
@@ -594,26 +618,6 @@ public class AIService {
         return stem.trim().replaceAll("\\s+", " ").toLowerCase();
     }
 
-    private List<MCQ> toTransientMcqs(List<MCQDTO.CreateRequest> requests) {
-        List<MCQ> result = new ArrayList<>();
-        long tempId = -1L;
-
-        for (MCQDTO.CreateRequest req : requests) {
-            MCQ m = new MCQ();
-            m.setQuestionId(tempId--);
-            m.setQuestionStem(req.getQuestionStem());
-            m.setOptionA(req.getOptionA());
-            m.setOptionB(req.getOptionB());
-            m.setOptionC(req.getOptionC());
-            m.setOptionD(req.getOptionD());
-            m.setOptionE(req.getOptionE());
-            m.setOptionF(req.getOptionF());
-            result.add(m);
-        }
-
-        return result;
-    }
-
     private SimilarityCheckResponse checkSimilarityForGeneration(
             String questionStem, String optionA, String optionB,
             String optionC, String optionD, String optionE, String optionF,
@@ -631,7 +635,7 @@ public class AIService {
 
         String candidate = buildQuestionText(questionStem, optionA, optionB, optionC, optionD, optionE, optionF);
         String prompt = buildSimilarityPrompt(candidate, existing);
-        String rawResponse = callModel(prompt);
+        String rawResponse = callModel(prompt, similaritySchema());
         SimilarityCheckResponse aiResult = parseSimilarityResponse(rawResponse, existing);
         return aiResult.isHasSimilar() ? aiResult : deterministic;
     }
@@ -748,7 +752,7 @@ public class AIService {
 
         String responseExample = "MCQ".equals(normalizedType)
                 ? """
-            [
+            {"questions": [
             {
                 \"questionStem\": \"...\",
                 \"optionA\": \"...\",
@@ -757,10 +761,10 @@ public class AIService {
                 \"optionD\": \"...\",
                 \"correctAnswer\": \"A\"
             }
-            ]
+            ]}
             """
                 : """
-            [
+            {"questions": [
             {
                 \"questionStem\": \"...\",
                 \"optionA\": \"...\",
@@ -771,7 +775,7 @@ public class AIService {
                 \"optionF\": \"...\",
                 \"correctAnswer\": \"A,C\"
             }
-            ]
+            ]}
             """;
 
         String avoidSection = "";
@@ -1472,7 +1476,7 @@ public class AIService {
 
         // Build prompt for similarity scoring
         String prompt = buildSimilarityPrompt(candidate, existing);
-        String rawResponse = callModel(prompt);
+        String rawResponse = callModel(prompt, similaritySchema());
         SimilarityCheckResponse aiResult = parseSimilarityResponse(rawResponse, existing);
         return aiResult.isHasSimilar() ? aiResult : deterministic;
     }
@@ -1560,12 +1564,12 @@ public class AIService {
 
         sb.append("""
             
-            Respond ONLY with a valid JSON array listing only questions with similarity >= 30%.
+            Respond ONLY with a JSON object whose "matches" array lists only questions with similarity >= 30%.
             No preamble, no markdown, just the JSON array.
             Format:
-            [{"id": 123, "similarity": 42}, {"id": 456, "similarity": 35}]
+            {"matches": [{"id": 123, "similarity": 42}, {"id": 456, "similarity": 35}]}
             
-            If no questions have similarity >= 30%, respond with: []
+            If no questions have similarity >= 30%, respond with: {"matches": []}
             """);
 
         return sb.toString();

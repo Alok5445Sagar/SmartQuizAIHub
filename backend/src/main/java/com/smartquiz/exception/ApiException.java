@@ -6,18 +6,28 @@ import org.springframework.http.HttpStatus;
 public abstract class ApiException extends RuntimeException {
 
     private final HttpStatus status;
+    private final long retryAfterSeconds;
 
     protected ApiException(HttpStatus status, String message) {
-        super(message);
-        this.status = status;
+        this(status, message, null, 0);
     }
 
     protected ApiException(HttpStatus status, String message, Throwable cause) {
+        this(status, message, cause, 0);
+    }
+
+    protected ApiException(HttpStatus status, String message, Throwable cause, long retryAfterSeconds) {
         super(message, cause);
         this.status = status;
+        this.retryAfterSeconds = retryAfterSeconds;
     }
 
     public HttpStatus getStatus() {
         return status;
+    }
+
+    /** Seconds a client should wait before retrying; 0 means no Retry-After header. */
+    public long getRetryAfterSeconds() {
+        return retryAfterSeconds;
     }
 }

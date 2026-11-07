@@ -32,6 +32,11 @@ import com.smartquiz.repository.MCQRepository;
 @DisplayName("AIService against a live Ollama")
 class AIServiceOllamaLiveIT {
 
+    private static AiCallGuard testGuard() {
+        return new AiCallGuard(new AiCallGuard.Settings(1, 5, java.time.Duration.ofMinutes(5), java.time.Duration.ofMinutes(5),
+                1, java.time.Duration.ofMillis(1), 50f, 4, 10, java.time.Duration.ofSeconds(30)));
+    }
+
     @Test
     void generatesAQuestionWithLocalModel() {
         String baseUrl = System.getenv().getOrDefault("OLLAMA_BASE_URL", "http://localhost:11434");
@@ -54,8 +59,7 @@ class AIServiceOllamaLiveIT {
         ReflectionTestUtils.setField(service, "generateRetryMultiplier", 2);
         ReflectionTestUtils.setField(service, "generateMinAttempts", 2);
         ReflectionTestUtils.setField(service, "maxOutputTokens", 1200);
-        ReflectionTestUtils.setField(service, "retryMaxAttempts", 1);
-        ReflectionTestUtils.setField(service, "retryInitialBackoffMs", 200L);
+        ReflectionTestUtils.setField(service, "aiCallGuard", testGuard());
         ReflectionTestUtils.setField(service, "maxRequestBytes", 30000);
         service.init();
 

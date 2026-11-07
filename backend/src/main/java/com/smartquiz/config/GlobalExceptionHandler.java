@@ -48,10 +48,10 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
             log.warn("{} on {}: {}", ex.getStatus().value(), request.getRequestURI(), ex.getMessage());
         }
         ResponseEntity<Object> response = respond(ex.getStatus(), ex.getMessage(), request, null);
-        if (ex instanceof com.smartquiz.exception.TooManyRequestsException tooMany) {
+        if (ex.getRetryAfterSeconds() > 0) {
             return ResponseEntity.status(response.getStatusCode())
                     .headers(response.getHeaders())
-                    .header(HttpHeaders.RETRY_AFTER, String.valueOf(tooMany.getRetryAfterSeconds()))
+                    .header(HttpHeaders.RETRY_AFTER, String.valueOf(ex.getRetryAfterSeconds()))
                     .body(response.getBody());
         }
         return response;

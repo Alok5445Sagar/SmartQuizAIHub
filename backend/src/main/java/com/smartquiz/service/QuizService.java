@@ -41,7 +41,6 @@ public class QuizService {
     private static final int DEFAULT_QUIZ_MCQ_COUNT = 10;
     private static final int DEFAULT_QUIZ_MSQ_COUNT = 5;
     private static final int DEFAULT_QUIZ_DURATION_MINUTES = 15;
-    private static final int AUTO_PICK_ATTEMPTS = 500;
     private static final long PARTICIPANT_DASHBOARD_SLOW_THRESHOLD_MS = 250;
 
     private final Random random = new Random();
@@ -59,10 +58,6 @@ public class QuizService {
     @Autowired private UserRepository userRepository;
     @Autowired private com.smartquiz.security.LoginAttemptGuard loginAttemptGuard;
     @Autowired private JwtUtils jwtUtils;
-
-    public List<QuizDTO.QuestionChoice> getApprovedQuestionsByTopic(Long topicId) {
-        return getApprovedQuestionsByFilters(Collections.emptyList(), Collections.singletonList(topicId));
-    }
 
     @PreAuthorize("hasRole('ADMIN')")
 
@@ -1605,139 +1600,6 @@ public class QuizService {
             throw new BusinessRuleException(label + " count must be zero or greater");
         }
         return value;
-    }
-
-    private void validateDifficultyAvailability(List<MCQ> approvedQuestions, int easyCount, int mediumCount, int hardCount) {
-        long availableEasy = approvedQuestions.stream().filter(q -> q.getDifficulty() == MCQ.Difficulty.Easy).count();
-        long availableMedium = approvedQuestions.stream().filter(q -> q.getDifficulty() == MCQ.Difficulty.Medium).count();
-        long availableHard = approvedQuestions.stream().filter(q -> q.getDifficulty() == MCQ.Difficulty.Hard).count();
-
-        if (availableEasy < easyCount || availableMedium < mediumCount || availableHard < hardCount) {
-            throw new BusinessRuleException("Not enough approved questions for requested easy/medium/hard distribution");
-        }
-    }
-
-    private List<MCQ> tryBuildSelection(List<MCQ> candidates,
-                                        int totalQuestions,
-                                        int mcqTarget,
-                                        int msqTarget,
-                                        int easyTarget,
-                                        int mediumTarget,
-                                        int hardTarget) {
-        if (candidates == null || candidates.isEmpty()) {
-            return null;
-        }
-
-        for (int attempt = 0; attempt < AUTO_PICK_ATTEMPTS; attempt++) {
-            List<MCQ> shuffled = new ArrayList<>(candidates);
-            Collections.shuffle(shuffled, random);
-
-            int remainingMcq = mcqTarget;
-            int remainingMsq = msqTarget;
-            EnumMap<MCQ.Difficulty, Integer> remainingDifficulty = new EnumMap<>(MCQ.Difficulty.class);
-            remainingDifficulty.put(MCQ.Difficulty.Easy, easyTarget);
-            remainingDifficulty.put(MCQ.Difficulty.Medium, mediumTarget);
-            remainingDifficulty.put(MCQ.Difficulty.Hard, hardTarget);
-
-            List<MCQ> selected = new ArrayList<>();
-            Set<Long> selectedIds = new HashSet<>();
-
-            boolean success = true;
-            for (int i = 0; i < totalQuestions; i++) {
-                List<MCQ> feasible = new ArrayList<>();
-                for (MCQ candidate : shuffled) {
-                    if (selectedIds.contains(candidate.getQuestionId())) {
-                        continue;
-                    }
-                    if (!fitsCurrentNeeds(candidate, remainingMcq, remainingMsq, remainingDifficulty)) {
-                        continue;
-                    }
-
-                    int nextMcq = remainingMcq - (candidate.getQuestionType() == MCQ.QuestionType.MCQ ? 1 : 0);
-                    int nextMsq = remainingMsq - (candidate.getQuestionType() == MCQ.QuestionType.MSQ ? 1 : 0);
-                    EnumMap<MCQ.Difficulty, Integer> nextDifficulty = new EnumMap<>(remainingDifficulty);
-                    nextDifficulty.put(candidate.getDifficulty(), nextDifficulty.get(candidate.getDifficulty()) - 1);
-
-                    if (hasCapacityForRemaining(shuffled, selectedIds, candidate.getQuestionId(), nextMcq, nextMsq, nextDifficulty)) {
-                        feasible.add(candidate);
-                    }
-                }
-
-                if (feasible.isEmpty()) {
-                    success = false;
-                    break;
-                }
-
-                MCQ picked = feasible.get(random.nextInt(feasible.size()));
-                selected.add(picked);
-                selectedIds.add(picked.getQuestionId());
-                if (picked.getQuestionType() == MCQ.QuestionType.MCQ) {
-                    remainingMcq--;
-                } else {
-                    remainingMsq--;
-                }
-                remainingDifficulty.put(picked.getDifficulty(), remainingDifficulty.get(picked.getDifficulty()) - 1);
-            }
-
-            if (success
-                    && remainingMcq == 0
-                    && remainingMsq == 0
-                    && remainingDifficulty.values().stream().allMatch(v -> v == 0)) {
-                Collections.shuffle(selected, random);
-                return selected;
-            }
-        }
-
-        return null;
-    }
-
-    private boolean fitsCurrentNeeds(MCQ candidate,
-                                     int remainingMcq,
-                                     int remainingMsq,
-                                     EnumMap<MCQ.Difficulty, Integer> remainingDifficulty) {
-        if (candidate.getQuestionType() == MCQ.QuestionType.MCQ && remainingMcq <= 0) {
-            return false;
-        }
-        if (candidate.getQuestionType() == MCQ.QuestionType.MSQ && remainingMsq <= 0) {
-            return false;
-        }
-        return remainingDifficulty.get(candidate.getDifficulty()) > 0;
-    }
-
-    private boolean hasCapacityForRemaining(List<MCQ> candidates,
-                                            Set<Long> selectedIds,
-                                            Long candidateToExclude,
-                                            int remainingMcq,
-                                            int remainingMsq,
-                                            EnumMap<MCQ.Difficulty, Integer> remainingDifficulty) {
-        long availableMcq = 0;
-        long availableMsq = 0;
-        EnumMap<MCQ.Difficulty, Integer> availableDifficulty = new EnumMap<>(MCQ.Difficulty.class);
-        availableDifficulty.put(MCQ.Difficulty.Easy, 0);
-        availableDifficulty.put(MCQ.Difficulty.Medium, 0);
-        availableDifficulty.put(MCQ.Difficulty.Hard, 0);
-
-        for (MCQ q : candidates) {
-            if (selectedIds.contains(q.getQuestionId())) {
-                continue;
-            }
-            if (Objects.equals(q.getQuestionId(), candidateToExclude)) {
-                continue;
-            }
-
-            if (q.getQuestionType() == MCQ.QuestionType.MCQ) {
-                availableMcq++;
-            } else if (q.getQuestionType() == MCQ.QuestionType.MSQ) {
-                availableMsq++;
-            }
-            availableDifficulty.put(q.getDifficulty(), availableDifficulty.get(q.getDifficulty()) + 1);
-        }
-
-        return availableMcq >= remainingMcq
-                && availableMsq >= remainingMsq
-                && availableDifficulty.get(MCQ.Difficulty.Easy) >= remainingDifficulty.get(MCQ.Difficulty.Easy)
-                && availableDifficulty.get(MCQ.Difficulty.Medium) >= remainingDifficulty.get(MCQ.Difficulty.Medium)
-                && availableDifficulty.get(MCQ.Difficulty.Hard) >= remainingDifficulty.get(MCQ.Difficulty.Hard);
     }
 
     private int resolveTotalQuestions(Integer requestedTotal) {

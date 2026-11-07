@@ -70,6 +70,7 @@ public class SecurityConfig {
                 // Re-dispatches (SSE completion, error pages) were already authorized on the original request.
                 .dispatcherTypeMatchers(DispatcherType.ASYNC, DispatcherType.ERROR).permitAll()
                 .requestMatchers("/api/auth/login").permitAll()
+                .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                 // The SSE stream authenticates with a one-time ticket; every other chat call needs a JWT.
                 .requestMatchers("/api/public/quiz/participant/chat/stream").permitAll()
                 .requestMatchers("/api/public/quiz/participant/chat/**").authenticated()
