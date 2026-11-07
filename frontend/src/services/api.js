@@ -105,49 +105,110 @@ export const quizAdminAPI = {
   downloadLeaderboardExcel: (quizId) => api.get(`/api/admin/quizzes/${quizId}/leaderboard/export`, { responseType: 'blob' }),
 };
 
+const bearer = (token) => (token ? { Authorization: `Bearer ${token}` } : {});
+
+// Identity travels only in the Authorization header; strip legacy id/token fields from request bodies.
+const withoutCredentials = ({ participantAuthToken, participantEnterpriseId, ...rest } = {}) => rest;
+
+const CHAT_STREAM_RETRY_MS = 3000;
+
 export const quizPublicAPI = {
-  getQuiz: (quizCode, { participantEnterpriseId = '', participantName = '', languageCode = 'en' } = {}) => {
+  getQuiz: (quizCode, { participantName = '', languageCode = 'en', participantAuthToken = '' } = {}) => {
     const params = new URLSearchParams();
-    if (participantEnterpriseId) params.append('participantEnterpriseId', participantEnterpriseId);
     if (participantName) params.append('participantName', participantName);
     if (languageCode) params.append('languageCode', languageCode);
     const query = params.toString();
-    return publicApi.get(`/api/public/quiz/${quizCode}${query ? `?${query}` : ''}`);
+    return publicApi.get(`/api/public/quiz/${quizCode}${query ? `?${query}` : ''}`, { headers: bearer(participantAuthToken) });
   },
   participantLogin: (quizCode, data) => publicApi.post(`/api/public/quiz/${quizCode}/participant-login`, data),
   participantPortalLogin: (data) => publicApi.post('/api/public/quiz/participant/login', data),
-  getParticipantPortalDashboard: ({ participantEnterpriseId = '', participantName = '' } = {}) => {
+  getParticipantPortalDashboard: ({ participantName = '', participantAuthToken = '' } = {}) => {
     const params = new URLSearchParams();
-    if (participantEnterpriseId) params.append('participantEnterpriseId', participantEnterpriseId);
-    if (participantName) params.append('participantName', participantName);
+    // Employees are identified by their token; guests by name.
+    if (!participantAuthToken && participantName) params.append('participantName', participantName);
     params.append('languageCode', getCurrentLanguageCode());
-    return publicApi.get(`/api/public/quiz/participant/dashboard?${params.toString()}`);
+    return publicApi.get(`/api/public/quiz/participant/dashboard?${params.toString()}`, { headers: bearer(participantAuthToken) });
   },
-  getParticipantChatUsers: ({ participantEnterpriseId, participantAuthToken }) => {
-    const params = new URLSearchParams({ participantEnterpriseId, participantAuthToken });
-    return publicApi.get(`/api/public/quiz/participant/chat/users?${params.toString()}`);
+  getParticipantChatUsers: ({ participantAuthToken }) =>
+    publicApi.get('/api/public/quiz/participant/chat/users', { headers: bearer(participantAuthToken) }),
+  getParticipantChatHistory: ({ participantAuthToken, withEnterpriseId, limit = 60 }) => {
+    const params = new URLSearchParams({ withEnterpriseId, limit });
+    return publicApi.get(`/api/public/quiz/participant/chat/history?${params.toString()}`, { headers: bearer(participantAuthToken) });
   },
-  getParticipantChatHistory: ({ participantEnterpriseId, participantAuthToken, withEnterpriseId, limit = 60 }) => {
-    const params = new URLSearchParams({ participantEnterpriseId, participantAuthToken, withEnterpriseId, limit });
-    return publicApi.get(`/api/public/quiz/participant/chat/history?${params.toString()}`);
-  },
-  sendParticipantChatMessage: (data) => publicApi.post('/api/public/quiz/participant/chat/send', data),
-  sendParticipantChatAttachment: (formData) => publicApi.post('/api/public/quiz/participant/chat/send-attachment', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
+  sendParticipantChatMessage: (data) => publicApi.post('/api/public/quiz/participant/chat/send', withoutCredentials(data), {
+    headers: bearer(data?.participantAuthToken),
   }),
-  publishParticipantTyping: (data) => publicApi.post('/api/public/quiz/participant/chat/typing', data),
-  markParticipantChatRead: (data) => publicApi.post('/api/public/quiz/participant/chat/read', data),
-  getParticipantChatStreamUrl: ({ participantEnterpriseId, participantAuthToken }) => {
+  sendParticipantChatAttachment: (formData) => {
+    const token = formData.get('participantAuthToken');
+    formData.delete('participantAuthToken');
+    formData.delete('participantEnterpriseId');
+    return publicApi.post('/api/public/quiz/participant/chat/send-attachment', formData, {
+      headers: { 'Content-Type': 'multipart/form-data', ...bearer(token) },
+    });
+  },
+  publishParticipantTyping: (data) => publicApi.post('/api/public/quiz/participant/chat/typing', withoutCredentials(data), {
+    headers: bearer(data?.participantAuthToken),
+  }),
+  markParticipantChatRead: (data) => publicApi.post('/api/public/quiz/participant/chat/read', withoutCredentials(data), {
+    headers: bearer(data?.participantAuthToken),
+  }),
+  /** EventSource cannot send headers, so exchange the JWT for a one-time ticket first. */
+  createParticipantChatStreamUrl: async ({ participantAuthToken }) => {
+    const res = await publicApi.post('/api/public/quiz/participant/chat/stream-ticket', null, {
+      headers: bearer(participantAuthToken),
+    });
     const baseURL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
-    const params = new URLSearchParams({ participantEnterpriseId, participantAuthToken });
+    const params = new URLSearchParams({ ticket: res.data.ticket });
     return `${baseURL}/api/public/quiz/participant/chat/stream?${params.toString()}`;
   },
-  getParticipantChatAttachmentUrl: ({ messageId, participantEnterpriseId, participantAuthToken }) => {
-    const baseURL = process.env.REACT_APP_API_URL || 'http://localhost:8080';
-    const params = new URLSearchParams({ participantEnterpriseId, participantAuthToken });
-    return `${baseURL}/api/public/quiz/participant/chat/attachment/${messageId}?${params.toString()}`;
+  /**
+   * Opens the chat SSE stream and keeps it open: tickets are single-use, so every reconnect
+   * fetches a fresh one. Returns a function that closes the stream for good.
+   */
+  openParticipantChatStream: ({ participantAuthToken, onEvent, onOpen, onError }) => {
+    let source = null;
+    let retryTimer = null;
+    let closed = false;
+
+    const connect = async () => {
+      if (closed) return;
+      try {
+        const url = await quizPublicAPI.createParticipantChatStreamUrl({ participantAuthToken });
+        if (closed) return;
+        source = new EventSource(url);
+        source.onopen = () => onOpen?.();
+        source.addEventListener('participant-chat', (event) => onEvent?.(event));
+        source.onmessage = (event) => onEvent?.(event);
+        source.onerror = () => {
+          onError?.();
+          source?.close();
+          source = null;
+          if (!closed) retryTimer = setTimeout(connect, CHAT_STREAM_RETRY_MS);
+        };
+      } catch {
+        onError?.();
+        if (!closed) retryTimer = setTimeout(connect, CHAT_STREAM_RETRY_MS);
+      }
+    };
+
+    connect();
+    return () => {
+      closed = true;
+      clearTimeout(retryTimer);
+      source?.close();
+    };
   },
-  submitAttempt: (quizCode, data) => publicApi.post(`/api/public/quiz/${quizCode}/attempt`, data),
+  fetchParticipantChatAttachment: async ({ messageId, participantAuthToken }) => {
+    const res = await publicApi.get(`/api/public/quiz/participant/chat/attachment/${messageId}`, {
+      headers: bearer(participantAuthToken),
+      responseType: 'blob',
+    });
+    return res.data;
+  },
+  submitAttempt: (quizCode, data) => {
+    const { participantAuthToken, ...body } = data || {};
+    return publicApi.post(`/api/public/quiz/${quizCode}/attempt`, body, { headers: bearer(participantAuthToken) });
+  },
   getLeaderboard: (quizCode) => publicApi.get(`/api/public/quiz/${quizCode}/leaderboard`),
 };
 

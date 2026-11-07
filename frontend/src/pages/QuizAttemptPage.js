@@ -79,7 +79,7 @@ export default function QuizAttemptPage() {
     try {
       const participantProfile = location.state?.participantProfile;
       const quizIdentity = {
-        participantEnterpriseId: participantProfile?.participantEnterpriseId || '',
+        participantAuthToken: participantProfile?.authToken || '',
         participantName: participantProfile?.participantName || '',
         languageCode: language,
       };

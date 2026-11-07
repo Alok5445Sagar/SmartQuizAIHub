@@ -190,7 +190,6 @@ public class QuizServiceTest extends BaseTest {
         QuizDTO.SubmitAttemptRequest request = new QuizDTO.SubmitAttemptRequest(
             "Guest User",
             null,
-            null,
             List.of(new QuizDTO.AnswerRequest(q1.getQuestionId(), List.of("A"))),
             null,
             false
@@ -214,7 +213,6 @@ public class QuizServiceTest extends BaseTest {
 
         QuizDTO.SubmitAttemptRequest request = new QuizDTO.SubmitAttemptRequest(
             "Guest User Two",
-            null,
             null,
             List.of(
                 new QuizDTO.AnswerRequest(q1.getQuestionId(), List.of("A")),
@@ -350,7 +348,6 @@ public class QuizServiceTest extends BaseTest {
 
         QuizDTO.SubmitAttemptRequest request = new QuizDTO.SubmitAttemptRequest(
                 "Timed Guest",
-                null,
                 null,
                 List.of(new QuizDTO.AnswerRequest(q1.getQuestionId(), List.of("A"))),
                 600,

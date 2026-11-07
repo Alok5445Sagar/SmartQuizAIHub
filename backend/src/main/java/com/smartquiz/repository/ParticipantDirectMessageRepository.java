@@ -22,7 +22,7 @@ public interface ParticipantDirectMessageRepository extends JpaRepository<Partic
             Pageable pageable
     );
 
-    @Modifying
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("UPDATE ParticipantDirectMessage m " +
             "SET m.readAt = :readAt " +
             "WHERE m.senderEnterpriseId = :senderEnterpriseId " +

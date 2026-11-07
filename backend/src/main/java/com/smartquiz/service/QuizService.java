@@ -22,8 +22,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.stereotype.Service;
@@ -59,7 +57,7 @@ public class QuizService {
     @Autowired private MCQTranslationRepository mcqTranslationRepository;
     @Autowired private TopicRepository topicRepository;
     @Autowired private UserRepository userRepository;
-    @Autowired private AuthenticationManager authenticationManager;
+    @Autowired private com.smartquiz.security.LoginAttemptGuard loginAttemptGuard;
     @Autowired private JwtUtils jwtUtils;
 
     public List<QuizDTO.QuestionChoice> getApprovedQuestionsByTopic(Long topicId) {
@@ -550,9 +548,7 @@ public class QuizService {
         }
 
         try {
-            Authentication authentication = authenticationManager.authenticate(
-                    new UsernamePasswordAuthenticationToken(request.getEnterpriseId().trim(), request.getPassword())
-            );
+            Authentication authentication = loginAttemptGuard.authenticate(request.getEnterpriseId().trim(), request.getPassword());
             if (authentication == null || !authentication.isAuthenticated()) {
                 throw new UnauthorizedException("Invalid credentials");
             }
@@ -584,9 +580,7 @@ public class QuizService {
             }
 
             try {
-                authenticationManager.authenticate(
-                    new UsernamePasswordAuthenticationToken(request.getEnterpriseId().trim(), request.getPassword())
-                );
+                loginAttemptGuard.authenticate(request.getEnterpriseId().trim(), request.getPassword());
             } catch (AuthenticationException ex) {
                 throw new UnauthorizedException("Invalid credentials");
             }
@@ -792,6 +786,16 @@ public class QuizService {
 
     @Transactional
     public QuizDTO.AttemptResultResponse submitAttempt(String quizCode, QuizDTO.SubmitAttemptRequest request) {
+        return submitAttempt(quizCode, request, null);
+    }
+
+    /**
+     * Submits an attempt. {@code authenticatedEnterpriseId} comes from the caller's JWT: when present the attempt
+     * is recorded for that employee; when absent it is a guest attempt keyed by name.
+     */
+    @Transactional
+    public QuizDTO.AttemptResultResponse submitAttempt(String quizCode, QuizDTO.SubmitAttemptRequest request,
+                                                       String authenticatedEnterpriseId) {
         Quiz quiz = getQuizByCodeOrThrow(quizCode);
 
         if (quiz.getStatus() != Quiz.Status.PUBLISHED) {
@@ -806,9 +810,17 @@ public class QuizService {
         String participantEnterpriseId = null;
         String participantName = normalizedName;
 
-        if (request.getParticipantEnterpriseId() != null && !request.getParticipantEnterpriseId().isBlank()) {
-            String enterpriseId = request.getParticipantEnterpriseId().trim();
-            validateParticipantToken(request.getParticipantAuthToken(), enterpriseId);
+        String claimedEnterpriseId = request.getParticipantEnterpriseId() == null ? null : request.getParticipantEnterpriseId().trim();
+        if (authenticatedEnterpriseId == null && claimedEnterpriseId != null && !claimedEnterpriseId.isBlank()) {
+            throw new UnauthorizedException("Employee login is required to submit with enterprise ID");
+        }
+        if (authenticatedEnterpriseId != null && claimedEnterpriseId != null && !claimedEnterpriseId.isBlank()
+                && !claimedEnterpriseId.equals(authenticatedEnterpriseId)) {
+            throw new UnauthorizedException("Employee session does not match the selected enterprise ID");
+        }
+
+        if (authenticatedEnterpriseId != null) {
+            String enterpriseId = authenticatedEnterpriseId;
 
             User user = userRepository.findByEnterpriseId(enterpriseId)
                     .orElseThrow(() -> new NotFoundException("Employee not found"));
@@ -1528,18 +1540,6 @@ public class QuizService {
         return "Monitor " + topicName + " for emerging gaps.";
     }
 
-    private void validateParticipantToken(String token, String expectedEnterpriseId) {
-        if (token == null || token.isBlank()) {
-            throw new UnauthorizedException("Employee login is required to submit with enterprise ID");
-        }
-        if (!jwtUtils.validateToken(token)) {
-            throw new UnauthorizedException("Employee session is invalid or expired");
-        }
-        String tokenEnterpriseId = jwtUtils.getEnterpriseIdFromToken(token);
-        if (!expectedEnterpriseId.equals(tokenEnterpriseId)) {
-            throw new UnauthorizedException("Employee session does not match the selected enterprise ID");
-        }
-    }
 
     private String normalizeSelectedAnswers(List<String> answers) {
         if (answers == null || answers.isEmpty()) {

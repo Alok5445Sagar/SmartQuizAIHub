@@ -333,8 +333,6 @@ public class QuizDTO {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class ParticipantChatMessageRequest {
-        private String participantEnterpriseId;
-        private String participantAuthToken;
         private String recipientEnterpriseId;
         @Size(max = 2000, message = "Message text exceeds allowed length")
         private String message;
@@ -344,8 +342,6 @@ public class QuizDTO {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class ParticipantChatTypingRequest {
-        private String participantEnterpriseId;
-        private String participantAuthToken;
         private String withEnterpriseId;
         private Boolean typing;
     }
@@ -354,8 +350,6 @@ public class QuizDTO {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class ParticipantChatReadRequest {
-        private String participantEnterpriseId;
-        private String participantAuthToken;
         private String withEnterpriseId;
         private Long lastSeenMessageId;
     }
@@ -383,7 +377,6 @@ public class QuizDTO {
         @Size(max = 200, message = "Participant name cannot exceed 200 characters")
         private String participantName;
         private String participantEnterpriseId;
-        private String participantAuthToken;
         @Size(max = 200)
         private List<AnswerRequest> answers;
         private Integer elapsedSeconds;

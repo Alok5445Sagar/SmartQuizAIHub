@@ -218,3 +218,84 @@ describe('aiAPI', () => {
     expect(onDone).toHaveBeenCalled();
   });
 });
+
+describe('quizPublicAPI credentials', () => {
+  // axios.create is mocked to return the same instance, so the public client is `api` here.
+  const { quizPublicAPI } = require('../../services/api');
+
+  afterEach(() => jest.clearAllMocks());
+
+  test('chat users sends the token as a Bearer header, never in the URL', async () => {
+    api.get = jest.fn().mockResolvedValue({ data: {} });
+    await quizPublicAPI.getParticipantChatUsers({ participantEnterpriseId: 'p1', participantAuthToken: 'tok' });
+    const [url, config] = api.get.mock.calls[0];
+    expect(url).toBe('/api/public/quiz/participant/chat/users');
+    expect(url).not.toContain('tok');
+    expect(config.headers.Authorization).toBe('Bearer tok');
+  });
+
+  test('send message strips id and token from the body', async () => {
+    api.post = jest.fn().mockResolvedValue({ data: {} });
+    await quizPublicAPI.sendParticipantChatMessage({
+      participantEnterpriseId: 'p1', participantAuthToken: 'tok', recipientEnterpriseId: 'p2', message: 'hi',
+    });
+    const [, body, config] = api.post.mock.calls[0];
+    expect(body).toEqual({ recipientEnterpriseId: 'p2', message: 'hi' });
+    expect(config.headers.Authorization).toBe('Bearer tok');
+  });
+
+  test('submit attempt sends the token as a header and not in the body', async () => {
+    api.post = jest.fn().mockResolvedValue({ data: {} });
+    await quizPublicAPI.submitAttempt('Q1', { participantName: 'A', participantAuthToken: 'tok', answers: [] });
+    const [url, body, config] = api.post.mock.calls[0];
+    expect(url).toBe('/api/public/quiz/Q1/attempt');
+    expect(body).not.toHaveProperty('participantAuthToken');
+    expect(config.headers.Authorization).toBe('Bearer tok');
+  });
+
+  test('guest attempts send no Authorization header', async () => {
+    api.post = jest.fn().mockResolvedValue({ data: {} });
+    await quizPublicAPI.submitAttempt('Q1', { participantName: 'Guest', participantAuthToken: null, answers: [] });
+    expect(api.post.mock.calls[0][2].headers).toEqual({});
+  });
+
+  test('stream URL carries a one-time ticket instead of the token', async () => {
+    api.post = jest.fn().mockResolvedValue({ data: { ticket: 'tkt-1' } });
+    const url = await quizPublicAPI.createParticipantChatStreamUrl({ participantAuthToken: 'tok' });
+    expect(api.post).toHaveBeenCalledWith(
+      '/api/public/quiz/participant/chat/stream-ticket', null, { headers: { Authorization: 'Bearer tok' } }
+    );
+    expect(url).toContain('ticket=tkt-1');
+    expect(url).not.toContain('tok&');
+    expect(url).not.toContain('participantAuthToken');
+  });
+
+  test('chat stream reconnects with a fresh ticket after an error', async () => {
+    jest.useFakeTimers();
+    const sources = [];
+    const originalEventSource = global.EventSource;
+    global.EventSource = jest.fn().mockImplementation((url) => {
+      const source = { url, addEventListener: jest.fn(), close: jest.fn() };
+      sources.push(source);
+      return source;
+    });
+    let n = 0;
+    api.post = jest.fn().mockImplementation(() => Promise.resolve({ data: { ticket: `t${++n}` } }));
+
+    const close = quizPublicAPI.openParticipantChatStream({ participantAuthToken: 'tok', onEvent: jest.fn() });
+    await Promise.resolve(); await Promise.resolve();
+    expect(sources).toHaveLength(1);
+    expect(sources[0].url).toContain('ticket=t1');
+
+    sources[0].onerror();
+    jest.advanceTimersByTime(3000);
+    await Promise.resolve(); await Promise.resolve();
+    expect(sources).toHaveLength(2);
+    expect(sources[1].url).toContain('ticket=t2');
+
+    close();
+    expect(sources[1].close).toHaveBeenCalled();
+    global.EventSource = originalEventSource;
+    jest.useRealTimers();
+  });
+});

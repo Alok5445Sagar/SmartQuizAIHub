@@ -10,7 +10,7 @@ import com.smartquiz.entity.ParticipantDirectMessage;
 import com.smartquiz.entity.User;
 import com.smartquiz.repository.ParticipantDirectMessageRepository;
 import com.smartquiz.repository.UserRepository;
-import com.smartquiz.security.JwtUtils;
+import com.smartquiz.security.RateLimitService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
@@ -50,7 +50,7 @@ public class ParticipantChatService {
 
     private static final Set<User.Role> CHAT_ROLES = EnumSet.of(User.Role.PARTICIPANT, User.Role.SME, User.Role.ADMIN);
 
-    @Value("${app.chat.attachments.dir:backend-data/chat-attachments}")
+    @Value("${app.chat.attachments.dir:${CHAT_ATTACHMENTS_DIR:backend-data/chat-attachments}}")
     private String attachmentsDir;
 
     @Autowired
@@ -60,12 +60,15 @@ public class ParticipantChatService {
     private ParticipantDirectMessageRepository participantDirectMessageRepository;
 
     @Autowired
-    private JwtUtils jwtUtils;
+    private RateLimitService rateLimitService;
+
+    @Autowired
+    private AttachmentPolicy attachmentPolicy;
 
     private final Map<String, CopyOnWriteArrayList<SseEmitter>> activeEmittersByEnterpriseId = new ConcurrentHashMap<>();
 
-    public QuizDTO.ParticipantChatUsersResponse getChatUsers(String participantEnterpriseId, String participantAuthToken) {
-        User self = validateEmployeeSession(participantEnterpriseId, participantAuthToken);
+    public QuizDTO.ParticipantChatUsersResponse getChatUsers(String selfEnterpriseId) {
+        User self = requireChatUser(selfEnterpriseId);
 
         List<User> candidates = userRepository.findByRoleInOrderByFullNameAsc(CHAT_ROLES);
         List<QuizDTO.ParticipantChatUserSummary> users = new ArrayList<>();
@@ -89,12 +92,11 @@ public class ParticipantChatService {
 
         @Transactional(readOnly = true)
         public QuizDTO.ParticipantChatHistoryResponse getConversationHistory(
-            String participantEnterpriseId,
-            String participantAuthToken,
+            String selfEnterpriseId,
             String withEnterpriseId,
             Integer limit
     ) {
-        User self = validateEmployeeSession(participantEnterpriseId, participantAuthToken);
+        User self = requireChatUser(selfEnterpriseId);
         User other = resolveEligibleUser(withEnterpriseId, self.getRole());
 
         int safeLimit = limit == null ? DEFAULT_HISTORY_LIMIT : Math.max(1, Math.min(limit, 200));
@@ -116,13 +118,14 @@ public class ParticipantChatService {
         return new QuizDTO.ParticipantChatHistoryResponse(self.getEnterpriseId(), other.getEnterpriseId(), messages);
     }
 
-    public QuizDTO.ParticipantChatMessageView sendMessage(QuizDTO.ParticipantChatMessageRequest request) {
+    public QuizDTO.ParticipantChatMessageView sendMessage(String selfEnterpriseId, QuizDTO.ParticipantChatMessageRequest request) {
         if (request == null) {
             throw new BusinessRuleException("Chat request is required");
         }
 
-        User sender = validateEmployeeSession(request.getParticipantEnterpriseId(), request.getParticipantAuthToken());
+        User sender = requireChatUser(selfEnterpriseId);
         User recipient = resolveEligibleUser(request.getRecipientEnterpriseId(), sender.getRole());
+        rateLimitService.consumeChatMessage(sender.getEnterpriseId());
 
         if (sender.getEnterpriseId().equals(recipient.getEnterpriseId())) {
             throw new BusinessRuleException("Cannot send chat message to yourself");
@@ -164,14 +167,14 @@ public class ParticipantChatService {
     }
 
     public QuizDTO.ParticipantChatMessageView sendAttachment(
-            String participantEnterpriseId,
-            String participantAuthToken,
+            String selfEnterpriseId,
             String recipientEnterpriseId,
             String message,
             MultipartFile file
     ) {
-        User sender = validateEmployeeSession(participantEnterpriseId, participantAuthToken);
+        User sender = requireChatUser(selfEnterpriseId);
         User recipient = resolveEligibleUser(recipientEnterpriseId, sender.getRole());
+        rateLimitService.consumeChatMessage(sender.getEnterpriseId());
 
         if (sender.getEnterpriseId().equals(recipient.getEnterpriseId())) {
             throw new BusinessRuleException("Cannot send chat message to yourself");
@@ -220,12 +223,12 @@ public class ParticipantChatService {
         return messageView;
     }
 
-    public ChatAttachmentDownload downloadAttachment(Long messageId, String participantEnterpriseId, String participantAuthToken) {
+    public ChatAttachmentDownload downloadAttachment(Long messageId, String selfEnterpriseId) {
         if (messageId == null) {
             throw new BusinessRuleException("Message ID is required");
         }
 
-        User self = validateEmployeeSession(participantEnterpriseId, participantAuthToken);
+        User self = requireChatUser(selfEnterpriseId);
         ParticipantDirectMessage message = participantDirectMessageRepository.findById(messageId)
                 .orElseThrow(() -> new NotFoundException("Attachment message not found"));
 
@@ -259,8 +262,8 @@ public class ParticipantChatService {
         }
     }
 
-    public SseEmitter openStream(String participantEnterpriseId, String participantAuthToken) {
-        User self = validateEmployeeSession(participantEnterpriseId, participantAuthToken);
+    public SseEmitter openStream(String selfEnterpriseId) {
+        User self = requireChatUser(selfEnterpriseId);
 
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
         String enterpriseId = self.getEnterpriseId();
@@ -366,12 +369,12 @@ public class ParticipantChatService {
         }
     }
 
-    public void publishTyping(QuizDTO.ParticipantChatTypingRequest request) {
+    public void publishTyping(String selfEnterpriseId, QuizDTO.ParticipantChatTypingRequest request) {
         if (request == null) {
             throw new BusinessRuleException("Typing request is required");
         }
 
-        User self = validateEmployeeSession(request.getParticipantEnterpriseId(), request.getParticipantAuthToken());
+        User self = requireChatUser(selfEnterpriseId);
         User other = resolveEligibleUser(request.getWithEnterpriseId(), self.getRole());
 
         if (self.getEnterpriseId().equals(other.getEnterpriseId())) {
@@ -395,12 +398,12 @@ public class ParticipantChatService {
     }
 
     @Transactional
-    public void markConversationRead(QuizDTO.ParticipantChatReadRequest request) {
+    public void markConversationRead(String selfEnterpriseId, QuizDTO.ParticipantChatReadRequest request) {
         if (request == null) {
             throw new BusinessRuleException("Read request is required");
         }
 
-        User self = validateEmployeeSession(request.getParticipantEnterpriseId(), request.getParticipantAuthToken());
+        User self = requireChatUser(selfEnterpriseId);
         User other = resolveEligibleUser(request.getWithEnterpriseId(), self.getRole());
 
         int updated = participantDirectMessageRepository.markMessagesAsRead(
@@ -431,31 +434,17 @@ public class ParticipantChatService {
         sendEventToUser(recipientEnterpriseId, event);
     }
 
-    private User validateEmployeeSession(String participantEnterpriseId, String participantAuthToken) {
-        if (participantEnterpriseId == null || participantEnterpriseId.isBlank()) {
-            throw new BusinessRuleException("Employee enterprise ID is required");
+    /** The caller is identified by the authenticated principal (JWT or redeemed stream ticket). */
+    private User requireChatUser(String enterpriseId) {
+        if (enterpriseId == null || enterpriseId.isBlank()) {
+            throw new UnauthorizedException("Authentication is required to use chat");
         }
-        if (participantAuthToken == null || participantAuthToken.isBlank()) {
-            throw new UnauthorizedException("Employee auth token is required");
-        }
-
-        String expectedEnterpriseId = participantEnterpriseId.trim();
-
-        if (!jwtUtils.validateToken(participantAuthToken)) {
-            throw new UnauthorizedException("Employee session is invalid or expired");
-        }
-        String tokenEnterpriseId = jwtUtils.getEnterpriseIdFromToken(participantAuthToken);
-        if (!expectedEnterpriseId.equals(tokenEnterpriseId)) {
-            throw new UnauthorizedException("Employee session does not match the selected enterprise ID");
-        }
-
-        User user = userRepository.findByEnterpriseId(expectedEnterpriseId)
-                .orElseThrow(() -> new NotFoundException("Employee not found"));
-
+        User user = userRepository.findByEnterpriseId(enterpriseId.trim())
+                .filter(User::isActive)
+                .orElseThrow(() -> new UnauthorizedException("Authentication is required to use chat"));
         if (!CHAT_ROLES.contains(user.getRole())) {
             throw new ForbiddenException("Current role is not allowed to use chat");
         }
-
         return user;
     }
 
@@ -569,20 +558,21 @@ public class ParticipantChatService {
             Path root = Paths.get(attachmentsDir).toAbsolutePath().normalize();
             Files.createDirectories(root);
 
-            String originalFileName = StringUtils.cleanPath(file.getOriginalFilename() == null ? "attachment.bin" : file.getOriginalFilename());
-            if (originalFileName.contains("..")) {
+            String originalFileName = Paths.get(StringUtils.cleanPath(file.getOriginalFilename() == null ? "attachment.bin" : file.getOriginalFilename()))
+                    .getFileName().toString();
+            if (originalFileName.isBlank() || originalFileName.contains("..")) {
                 throw new BusinessRuleException("Invalid attachment name");
             }
+            String contentType = attachmentPolicy.validate(file, originalFileName);
 
-            String storedName = System.currentTimeMillis() + "-" + UUID.randomUUID() + "-" + originalFileName.replace(' ', '_');
+            // Never use the client's file name on disk; it is only kept for display and download.
+            String storedName = UUID.randomUUID() + ".bin";
             Path target = root.resolve(storedName).normalize();
             if (!target.startsWith(root)) {
                 throw new BusinessRuleException("Invalid attachment path");
             }
 
             Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
-
-            String contentType = StringUtils.hasText(file.getContentType()) ? file.getContentType() : "application/octet-stream";
             return new StoredAttachment(originalFileName, contentType, file.getSize(), target.toString());
         } catch (IOException ex) {
             throw new IllegalStateException("Failed to store attachment");

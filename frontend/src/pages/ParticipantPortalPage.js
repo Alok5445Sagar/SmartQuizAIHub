@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { quizPublicAPI } from '../services/api';
+import ChatAttachment from '../components/ChatAttachment';
 import { clearParticipantSession, getParticipantSession, setParticipantSession } from '../services/participantSession';
 import { useLanguage } from '../context/LanguageContext';
 
@@ -43,13 +44,6 @@ const formatChatDate = (value) => {
   if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
 
   return date.toLocaleDateString();
-};
-
-const formatAttachmentSize = (bytes) => {
-  const size = Number(bytes) || 0;
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 };
 
 const toNumericMessageId = (value) => {
@@ -207,7 +201,7 @@ export default function ParticipantPortalPage() {
     }
     try {
       const res = await quizPublicAPI.getParticipantPortalDashboard({
-        participantEnterpriseId: identity.participantEnterpriseId,
+        participantAuthToken: identity.authToken,
         participantName: identity.participantName,
       });
       setDashboard(res.data);
@@ -614,16 +608,7 @@ export default function ParticipantPortalPage() {
   useEffect(() => {
     if (!canUseParticipantChat || !participantIdentity) return;
 
-    const streamUrl = quizPublicAPI.getParticipantChatStreamUrl({
-      participantEnterpriseId: participantIdentity.participantEnterpriseId,
-      participantAuthToken: participantIdentity.authToken,
-    });
-
-    const eventSource = new EventSource(streamUrl);
-
-    eventSource.onopen = () => {
-      setChatStreamConnected(true);
-    };
+    
 
     const handleStreamEvent = (event) => {
       if (!event?.data) return;
@@ -689,18 +674,17 @@ export default function ParticipantPortalPage() {
       }
     };
 
-    // Backend emits named SSE events (`participant-chat`), so subscribe explicitly.
-    eventSource.addEventListener('participant-chat', handleStreamEvent);
-    // Keep fallback for default/unnamed SSE payloads.
-    eventSource.onmessage = handleStreamEvent;
-
-    eventSource.onerror = () => {
-      setChatStreamConnected(false);
-    };
+    // Tickets are single-use; the helper fetches a fresh one on every (re)connect.
+    const closeStream = quizPublicAPI.openParticipantChatStream({
+      participantAuthToken: participantIdentity.authToken,
+      onEvent: handleStreamEvent,
+      onOpen: () => setChatStreamConnected(true),
+      onError: () => setChatStreamConnected(false),
+    });
 
     return () => {
       setChatStreamConnected(false);
-      eventSource.close();
+      closeStream();
     };
   }, [canUseParticipantChat, participantIdentity?.participantEnterpriseId, participantIdentity?.authToken, selectedChatUserId]);
 
@@ -1144,55 +1128,7 @@ export default function ParticipantPortalPage() {
                                   <div style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{message.message}</div>
                                   {message.hasAttachment && message.messageId && (
                                     <div style={{ marginTop: 8 }}>
-                                      {message.attachmentContentType?.startsWith('image/') ? (
-                                        <a
-                                          href={quizPublicAPI.getParticipantChatAttachmentUrl({
-                                            messageId: message.messageId,
-                                            participantEnterpriseId: participantIdentity.participantEnterpriseId,
-                                            participantAuthToken: participantIdentity.authToken,
-                                          })}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          style={{ display: 'inline-block' }}
-                                        >
-                                          <img
-                                            src={quizPublicAPI.getParticipantChatAttachmentUrl({
-                                              messageId: message.messageId,
-                                              participantEnterpriseId: participantIdentity.participantEnterpriseId,
-                                              participantAuthToken: participantIdentity.authToken,
-                                            })}
-                                            alt={message.attachmentName || 'attachment'}
-                                            style={{ maxWidth: 220, maxHeight: 180, borderRadius: 8, border: '1px solid rgba(148,163,184,0.45)' }}
-                                          />
-                                        </a>
-                                      ) : (
-                                        <a
-                                          href={quizPublicAPI.getParticipantChatAttachmentUrl({
-                                            messageId: message.messageId,
-                                            participantEnterpriseId: participantIdentity.participantEnterpriseId,
-                                            participantAuthToken: participantIdentity.authToken,
-                                          })}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          style={{
-                                            display: 'inline-flex',
-                                            alignItems: 'center',
-                                            gap: 8,
-                                            textDecoration: 'none',
-                                            color: mine ? '#fff' : '#1d4ed8',
-                                            background: mine ? 'rgba(255,255,255,0.18)' : '#eff6ff',
-                                            borderRadius: 8,
-                                            padding: '6px 8px',
-                                            border: mine ? '1px solid rgba(255,255,255,0.32)' : '1px solid #bfdbfe',
-                                          }}
-                                        >
-                                          <span>📎</span>
-                                          <span style={{ fontSize: 12 }}>
-                                            {message.attachmentName || 'Attachment'}
-                                            {message.attachmentSizeBytes ? ` (${formatAttachmentSize(message.attachmentSizeBytes)})` : ''}
-                                          </span>
-                                        </a>
-                                      )}
+                                      <ChatAttachment message={message} authToken={participantIdentity.authToken} mine={mine} />
                                     </div>
                                   )}
                                   {mine && !message.pending && (

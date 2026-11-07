@@ -27,7 +27,7 @@ jest.mock('../../services/api', () => ({
   quizPublicAPI: {
     getParticipantChatUsers: jest.fn(),
     getParticipantChatHistory: jest.fn(),
-    getParticipantChatStreamUrl: jest.fn(),
+    openParticipantChatStream: jest.fn(),
     publishParticipantTyping: jest.fn(),
     markParticipantChatRead: jest.fn(),
     sendParticipantChatMessage: jest.fn(),
@@ -55,7 +55,7 @@ describe('TeamChatPage mobile conversation switch', () => {
 
     window.HTMLElement.prototype.scrollTo = jest.fn();
 
-    quizPublicAPI.getParticipantChatStreamUrl.mockReturnValue('http://localhost:8080/sse');
+    quizPublicAPI.openParticipantChatStream.mockReturnValue(jest.fn());
     quizPublicAPI.getParticipantChatUsers.mockResolvedValue({
       data: {
         users: [
@@ -105,6 +105,14 @@ describe('TeamChatPage mobile conversation switch', () => {
 
     global.EventSource = originalEventSource;
     window.HTMLElement.prototype.scrollTo = originalScrollTo;
+  });
+
+  test('opens the chat stream with the auth token, not a URL token', async () => {
+    render(<TeamChatPage />);
+    await waitFor(() => expect(quizPublicAPI.openParticipantChatStream).toHaveBeenCalled());
+    const [args] = quizPublicAPI.openParticipantChatStream.mock.calls[0];
+    expect(args.participantAuthToken).toBe('token-123');
+    expect(typeof args.onEvent).toBe('function');
   });
 
   test('opens selected user thread on mobile and keeps deterministic selectors available', async () => {

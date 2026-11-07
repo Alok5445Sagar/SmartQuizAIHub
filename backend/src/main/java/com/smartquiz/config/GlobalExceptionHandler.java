@@ -47,7 +47,14 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         if (ex.getStatus().is5xxServerError()) {
             log.warn("{} on {}: {}", ex.getStatus().value(), request.getRequestURI(), ex.getMessage());
         }
-        return respond(ex.getStatus(), ex.getMessage(), request, null);
+        ResponseEntity<Object> response = respond(ex.getStatus(), ex.getMessage(), request, null);
+        if (ex instanceof com.smartquiz.exception.TooManyRequestsException tooMany) {
+            return ResponseEntity.status(response.getStatusCode())
+                    .headers(response.getHeaders())
+                    .header(HttpHeaders.RETRY_AFTER, String.valueOf(tooMany.getRetryAfterSeconds()))
+                    .body(response.getBody());
+        }
+        return response;
     }
 
     @ExceptionHandler({BadCredentialsException.class, InternalAuthenticationServiceException.class,

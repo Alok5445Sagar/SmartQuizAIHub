@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { quizPublicAPI } from '../services/api';
+import ChatAttachment from '../components/ChatAttachment';
 import { getAuthToken } from '../services/authSession';
 
 const CHAT_SYNC_INTERVAL_MS = 1000;
@@ -17,13 +18,6 @@ const formatTime = (value) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-};
-
-const formatAttachmentSize = (bytes) => {
-  const size = Number(bytes) || 0;
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 };
 
 const toSortableTime = (value) => {
@@ -409,14 +403,7 @@ export default function TeamChatPage() {
   useEffect(() => {
     if (!canUseChat) return;
 
-    const streamUrl = quizPublicAPI.getParticipantChatStreamUrl({
-      participantEnterpriseId: selfEnterpriseId,
-      participantAuthToken: authToken,
-    });
-
-    const source = new EventSource(streamUrl);
-
-    source.onopen = () => setStreamConnected(true);
+    
 
     const handleStreamEvent = (event) => {
       if (!event?.data) return;
@@ -486,16 +473,17 @@ export default function TeamChatPage() {
       }
     };
 
-    // Backend emits named SSE events (`participant-chat`), so listen explicitly.
-    source.addEventListener('participant-chat', handleStreamEvent);
-    // Keep fallback for any default/unnamed SSE messages.
-    source.onmessage = handleStreamEvent;
-
-    source.onerror = () => setStreamConnected(false);
+    // Tickets are single-use; the helper fetches a fresh one on every (re)connect.
+    const closeStream = quizPublicAPI.openParticipantChatStream({
+      participantAuthToken: authToken,
+      onEvent: handleStreamEvent,
+      onOpen: () => setStreamConnected(true),
+      onError: () => setStreamConnected(false),
+    });
 
     return () => {
       setStreamConnected(false);
-      source.close();
+      closeStream();
     };
   }, [canUseChat, selfEnterpriseId, authToken, selectedUserId]);
 
@@ -657,55 +645,7 @@ export default function TeamChatPage() {
                     <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.35 }}>{message.message}</div>
                                   {message.hasAttachment && message.messageId && (
                                     <div style={{ marginTop: 8 }}>
-                                      {message.attachmentContentType?.startsWith('image/') ? (
-                                        <a
-                                          href={quizPublicAPI.getParticipantChatAttachmentUrl({
-                                            messageId: message.messageId,
-                                            participantEnterpriseId: selfEnterpriseId,
-                                            participantAuthToken: authToken,
-                                          })}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          style={{ display: 'inline-block' }}
-                                        >
-                                          <img
-                                            src={quizPublicAPI.getParticipantChatAttachmentUrl({
-                                              messageId: message.messageId,
-                                              participantEnterpriseId: selfEnterpriseId,
-                                              participantAuthToken: authToken,
-                                            })}
-                                            alt={message.attachmentName || 'attachment'}
-                                            style={{ maxWidth: 220, maxHeight: 180, borderRadius: 8, border: '1px solid rgba(148,163,184,0.45)' }}
-                                          />
-                                        </a>
-                                      ) : (
-                                        <a
-                                          href={quizPublicAPI.getParticipantChatAttachmentUrl({
-                                            messageId: message.messageId,
-                                            participantEnterpriseId: selfEnterpriseId,
-                                            participantAuthToken: authToken,
-                                          })}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          style={{
-                                            display: 'inline-flex',
-                                            alignItems: 'center',
-                                            gap: 8,
-                                            textDecoration: 'none',
-                                            color: mine ? '#fff' : '#1d4ed8',
-                                            background: mine ? 'rgba(255,255,255,0.18)' : '#eff6ff',
-                                            borderRadius: 8,
-                                            padding: '6px 8px',
-                                            border: mine ? '1px solid rgba(255,255,255,0.32)' : '1px solid #bfdbfe',
-                                          }}
-                                        >
-                                          <span>📎</span>
-                                          <span style={{ fontSize: 12 }}>
-                                            {message.attachmentName || 'Attachment'}
-                                            {message.attachmentSizeBytes ? ` (${formatAttachmentSize(message.attachmentSizeBytes)})` : ''}
-                                          </span>
-                                        </a>
-                                      )}
+                                      <ChatAttachment message={message} authToken={authToken} mine={mine} />
                                     </div>
                                   )}
                     <div style={{ marginTop: 5, fontSize: 11, opacity: 0.85, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
